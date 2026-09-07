@@ -16,7 +16,7 @@ from telegram.ext import (
 import config
 from database import init_db, set_free_channel, set_vip_channel
 from jobs import automatic_signal_job, paper_trade_monitor_job
-from telegram.commands import (
+from bot_handlers.commands import (
     start_command,
     myvip_command,
     trial_command,
@@ -29,9 +29,9 @@ from telegram.commands import (
     papertrades_command,
     broadcast_command,
 )
-from telegram.callbacks import menu_callback_router
-from telegram.payments import payment_proof_message_handler
-from telegram.admin import (
+from bot_handlers.callbacks import menu_callback_router
+from bot_handlers.payments import payment_proof_message_handler
+from bot_handlers.admin import (
     setbank_command,
     setopay_command,
     addcrypto_command,
@@ -100,10 +100,10 @@ def main() -> None:
     # ---- Callbacks ----
     application.add_handler(CallbackQueryHandler(menu_callback_router))
 
-    # ---- Payment proof (text or photo while user has pending payment) ----
+    # ---- Payment proof ----
     application.add_handler(
         MessageHandler(
-            (filters.TEXT & ~filters.COMMAND) | filters.PHOTO,
+            (filters.TEXT & \~filters.COMMAND) | filters.PHOTO,
             payment_proof_message_handler,
         )
     )
