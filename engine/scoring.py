@@ -1,294 +1,147 @@
-from future import annotations
+from __future__ import annotations
 
 from typing import Any, Dict, List, Tuple
 
-============================================================
-
-APEX SIGNAL SCORING ENGINE
-
-============================================================
-
-Purpose:
-
-Convert technical conditions into a consistent 0-110 score.
-
-This file does NOT:
-
-- fetch market data
-
-- calculate indicators
-
-- send Telegram messages
-
-- access PostgreSQL
-
-Those responsibilities belong to other modules.
-
-============================================================
-
-WEAK_MIN = 70
-MODERATE_MIN = 80
-STRONG_MIN = 90
-VERY_STRONG_MIN = 100
-STRONGER_MIN = 105
-
 MAX_SCORE = 110
 
-def get_strength(score: int) -> str | None:
-"""Return the human-readable strength level for a signal."""
 
-score = int(score)
+def get_strength(score: float | int) -> str:
+    """Map numeric score to strength label."""
+    try:
+        s = float(score)
+    except (TypeError, ValueError):
+        return "WEAK"
+    if s >= 90:
+        return "VERY STRONG"
+    if s >= 75:
+        return "STRONG"
+    if s >= 60:
+        return "MODERATE"
+    return "WEAK"
 
-if score >= STRONGER_MIN:
-    return "💎 STRONGER"
 
-if score >= VERY_STRONG_MIN:
-    return "🔥 VERY STRONG"
+def _safe(value: Any, default: float = 0.0) -> float:
+    try:
+        result = float(value)
+        if result != result:
+            return default
+        return result
+    except (TypeError, ValueError):
+        return default
 
-if score >= STRONG_MIN:
-    return "🔥 STRONG"
-
-if score >= MODERATE_MIN:
-    return "🟡 MODERATE"
-
-if score >= WEAK_MIN:
-    return "⚠️ WEAK"
-
-return None
-
-def clamp_score(score: int) -> int:
-"""Keep a score safely inside the 0-110 range."""
-
-return max(0, min(int(score), MAX_SCORE))
-
-def score_direction(
-*,
-ema9: float,
-ema21: float,
-higher_ema9: float,
-higher_ema21: float,
-rsi: float,
-macd: float,
-macd_signal: float,
-previous_macd: float,
-previous_macd_signal: float,
-candle_open: float,
-candle_close: float,
-) -> Tuple[str | None, int, List[str], List[str]]:
-"""
-Score BUY and SELL conditions.
-
-Maximum score:
-    25  = lower-timeframe EMA alignment
-    20  = higher-timeframe trend
-    15  = RSI momentum
-    20  = MACD direction
-    10  = fresh MACD crossover
-    20  = confirmation candle
-
-    TOTAL = 110
-
-Returns:
-    (
-        direction,
-        score,
-        reasons,
-        opposite_reasons,
-    )
-
-If neither side reaches a meaningful score, direction is None.
-"""
-
-buy_score = 0
-sell_score = 0
-
-buy_reasons: List[str] = []
-sell_reasons: List[str] = []
-
-# --------------------------------------------------------
-# 1. LOWER TIMEFRAME EMA ALIGNMENT — 25 POINTS
-# --------------------------------------------------------
-
-if ema9 > ema21:
-    buy_score += 25
-    buy_reasons.append("15M EMA bullish alignment (EMA9 > EMA21)")
-
-elif ema9 < ema21:
-    sell_score += 25
-    sell_reasons.append("15M EMA bearish alignment (EMA9 < EMA21)")
-
-# --------------------------------------------------------
-# 2. HIGHER TIMEFRAME TREND — 20 POINTS
-# --------------------------------------------------------
-
-if higher_ema9 > higher_ema21:
-    buy_score += 20
-    buy_reasons.append("1H higher-timeframe trend is bullish")
-
-elif higher_ema9 < higher_ema21:
-    sell_score += 20
-    sell_reasons.append("1H higher-timeframe trend is bearish")
-
-# --------------------------------------------------------
-# 3. RSI MOMENTUM — 15 POINTS
-# --------------------------------------------------------
-#
-# We avoid treating extreme RSI as automatically bullish
-# or bearish. The goal here is momentum confirmation.
-# --------------------------------------------------------
-
-if 50 <= rsi <= 70:
-    buy_score += 15
-    buy_reasons.append(f"RSI confirms bullish momentum ({rsi:.1f})")
-
-elif 30 <= rsi < 50:
-    sell_score += 15
-    sell_reasons.append(f"RSI confirms bearish momentum ({rsi:.1f})")
-
-# --------------------------------------------------------
-# 4. MACD DIRECTION — 20 POINTS
-# --------------------------------------------------------
-
-if macd > macd_signal:
-    buy_score += 20
-    buy_reasons.append("MACD confirms bullish momentum")
-
-elif macd < macd_signal:
-    sell_score += 20
-    sell_reasons.append("MACD confirms bearish momentum")
-
-# --------------------------------------------------------
-# 5. FRESH MACD CROSSOVER — 10 POINTS
-# --------------------------------------------------------
-
-bullish_cross = (
-    macd > macd_signal
-    and previous_macd <= previous_macd_signal
-)
-
-bearish_cross = (
-    macd < macd_signal
-    and previous_macd >= previous_macd_signal
-)
-
-if bullish_cross:
-    buy_score += 10
-    buy_reasons.append("Fresh bullish MACD crossover")
-
-elif bearish_cross:
-    sell_score += 10
-    sell_reasons.append("Fresh bearish MACD crossover")
-
-# --------------------------------------------------------
-# 6. CONFIRMATION CANDLE — 20 POINTS
-# --------------------------------------------------------
-
-if candle_close > candle_open:
-    buy_score += 20
-    buy_reasons.append("15M candle confirms bullish price action")
-
-elif candle_close < candle_open:
-    sell_score += 20
-    sell_reasons.append("15M candle confirms bearish price action")
-
-# --------------------------------------------------------
-# FINAL DIRECTION
-# --------------------------------------------------------
-
-buy_score = clamp_score(buy_score)
-sell_score = clamp_score(sell_score)
-
-if buy_score > sell_score:
-    return "BUY", buy_score, buy_reasons, sell_reasons
-
-if sell_score > buy_score:
-    return "SELL", sell_score, sell_reasons, buy_reasons
-
-# Equal scores = no directional advantage.
-return None, 0, [], []
 
 def score_signal(
-*,
-ema9: float,
-ema21: float,
-higher_ema9: float,
-higher_ema21: float,
-rsi: float,
-macd: float,
-macd_signal: float,
-previous_macd: float,
-previous_macd_signal: float,
-candle_open: float,
-candle_close: float,
-minimum_score: int = WEAK_MIN,
-) -> Dict[str, Any]:
-"""
-Main public scoring function.
+    *,
+    direction: str,
+    ema9: float,
+    ema21: float,
+    rsi: float,
+    macd: float,
+    macd_signal: float,
+    atr: float = 0.0,
+    close: float = 0.0,
+) -> Tuple[int, List[str]]:
+    """
+    Convert technical conditions into a 0-110 score.
 
-Returns a consistent dictionary that the signal generator
-can use without knowing how the scoring system works.
-"""
+    Returns (score, list_of_reasons).
+    """
+    direction = str(direction).upper().strip()
+    reasons: List[str] = []
+    score = 0
 
-direction, score, reasons, opposite_reasons = score_direction(
-    ema9=ema9,
-    ema21=ema21,
-    higher_ema9=higher_ema9,
-    higher_ema21=higher_ema21,
-    rsi=rsi,
-    macd=macd,
-    macd_signal=macd_signal,
-    previous_macd=previous_macd,
-    previous_macd_signal=previous_macd_signal,
-    candle_open=candle_open,
-    candle_close=candle_close,
-)
+    ema9_v = _safe(ema9)
+    ema21_v = _safe(ema21)
+    rsi_v = _safe(rsi)
+    macd_v = _safe(macd)
+    macd_sig = _safe(macd_signal)
 
-score = clamp_score(score)
+    # Trend / EMA alignment (max 35)
+    if direction == "BUY":
+        if ema9_v > ema21_v:
+            score += 25
+            reasons.append("EMA9 above EMA21 (bullish trend)")
+            if close and close > ema9_v:
+                score += 10
+                reasons.append("Price above EMA9")
+        else:
+            reasons.append("EMA not aligned for BUY")
+    elif direction == "SELL":
+        if ema9_v < ema21_v:
+            score += 25
+            reasons.append("EMA9 below EMA21 (bearish trend)")
+            if close and close < ema9_v:
+                score += 10
+                reasons.append("Price below EMA9")
+        else:
+            reasons.append("EMA not aligned for SELL")
 
-minimum_score = max(0, int(minimum_score))
+    # RSI (max 30)
+    if direction == "BUY":
+        if 45 <= rsi_v <= 68:
+            score += 30
+            reasons.append(f"RSI supportive for BUY ({rsi_v:.1f})")
+        elif 40 <= rsi_v < 45 or 68 < rsi_v <= 72:
+            score += 15
+            reasons.append(f"RSI mildly supportive ({rsi_v:.1f})")
+        else:
+            reasons.append(f"RSI not ideal for BUY ({rsi_v:.1f})")
+    elif direction == "SELL":
+        if 32 <= rsi_v <= 55:
+            score += 30
+            reasons.append(f"RSI supportive for SELL ({rsi_v:.1f})")
+        elif 28 <= rsi_v < 32 or 55 < rsi_v <= 60:
+            score += 15
+            reasons.append(f"RSI mildly supportive ({rsi_v:.1f})")
+        else:
+            reasons.append(f"RSI not ideal for SELL ({rsi_v:.1f})")
 
-valid = (
-    direction is not None
-    and score >= minimum_score
-)
+    # MACD (max 30)
+    if direction == "BUY":
+        if macd_v > macd_sig:
+            score += 25
+            reasons.append("MACD above signal (bullish)")
+            if macd_v > 0:
+                score += 5
+                reasons.append("MACD histogram positive zone")
+        else:
+            reasons.append("MACD not aligned for BUY")
+    elif direction == "SELL":
+        if macd_v < macd_sig:
+            score += 25
+            reasons.append("MACD below signal (bearish)")
+            if macd_v < 0:
+                score += 5
+                reasons.append("MACD histogram negative zone")
+        else:
+            reasons.append("MACD not aligned for SELL")
 
-if not valid:
-    return {
-        "valid": False,
-        "direction": None,
-        "score": score,
-        "max_score": MAX_SCORE,
-        "strength": None,
-        "reasons": [],
-        "opposite_reasons": opposite_reasons,
-    }
+    # ATR presence (max 15) — volatility available for risk sizing
+    if _safe(atr) > 0:
+        score += 15
+        reasons.append("ATR available for risk sizing")
 
-return {
-    "valid": True,
-    "direction": direction,
-    "score": score,
-    "max_score": MAX_SCORE,
-    "strength": get_strength(score),
-    "reasons": reasons,
-    "opposite_reasons": opposite_reasons,
-}
+    score = max(0, min(int(round(score)), MAX_SCORE))
+    return score, reasons
 
-def is_vip_score(score: int, minimum_score: int = STRONG_MIN) -> bool:
-"""Return True when a signal qualifies for VIP delivery."""
 
-return int(score) >= int(minimum_score)
+def score_from_row(row: Dict[str, Any], direction: str) -> Tuple[int, List[str]]:
+    """Convenience wrapper using a candle/indicator row dict."""
+    return score_signal(
+        direction=direction,
+        ema9=_safe(row.get("ema9")),
+        ema21=_safe(row.get("ema21")),
+        rsi=_safe(row.get("rsi")),
+        macd=_safe(row.get("macd")),
+        macd_signal=_safe(row.get("macd_signal", row.get("macd_sig"))),
+        atr=_safe(row.get("atr")),
+        close=_safe(row.get("close")),
+    )
 
-def is_elite_score(score: int) -> bool:
-"""Return True for the highest Apex signal tier."""
 
-return int(score) >= STRONGER_MIN
-
-def score_label(score: int) -> str:
-"""Return a safe display label for any score."""
-
-strength = get_strength(score)
-
-if strength:
-    return strength
-
-return "⚪ NO QUALIFYING SETUP"
+__all__ = [
+    "MAX_SCORE",
+    "get_strength",
+    "score_signal",
+    "score_from_row",
+]
