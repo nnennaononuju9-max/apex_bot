@@ -112,7 +112,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def myvip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    from telegram.payments import send_vip_menu
+    from bot_handlers.payments import send_vip_menu
     await send_vip_menu(update.message, update.effective_user.id)
 
 
