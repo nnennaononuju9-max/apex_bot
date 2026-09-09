@@ -18,7 +18,7 @@ from database import (
     get_vip_channel,
     is_vip,
 )
-from telegram.menus import (
+from bot_handlers.menus import (
     broker_message,
     economic_news_text,
     lot_size_calculator_text,
