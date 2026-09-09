@@ -23,7 +23,7 @@ from engine import (
     generate_free_signal,
     mark_signal_posted,
 )
-from telegram.signals import build_signal_message, get_score, get_signal_key
+from bot_handlers.signals import build_signal_message, get_score, get_signal_key
 
 logger = logging.getLogger(__name__)
 
