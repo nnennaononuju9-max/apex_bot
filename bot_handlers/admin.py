@@ -16,7 +16,7 @@ from database import (
     update_payment_settings,
 )
 from engine import create_signal
-from telegram.signals import build_signal_message
+from bot_handlers.signals import build_signal_message
 from utils.formatting import premium_badge
 
 logger = logging.getLogger(__name__)
