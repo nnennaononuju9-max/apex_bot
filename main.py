@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 
-from bot_handlers.ext import (
+from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
