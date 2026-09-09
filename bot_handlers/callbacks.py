@@ -28,8 +28,8 @@ from bot_handlers.menus import (
     monthly_pl_report_text,
     welcome_text,
 )
-from telegram.commands import check_channel_membership, is_admin, _community_sentiment
-from telegram.payments import (
+from bot_handlers.commands import check_channel_membership, is_admin, _community_sentiment
+from bot_hamdlers.payments import (
     handle_admin_payment_decision,
     handle_crypto_choice,
     handle_payment_method_choice,
