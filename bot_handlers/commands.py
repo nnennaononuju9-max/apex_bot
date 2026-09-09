@@ -23,7 +23,7 @@ from database import (
     get_recent_paper_trades,
     is_vip,
 )
-from telegram.menus import (
+from bot_handlers.menus import (
     channel_gatekeeper_keyboard,
     gatekeeper_text,
     lot_size_calculator_text,
