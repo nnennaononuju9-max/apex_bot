@@ -13,76 +13,133 @@ from .signal_generator import (
     mark_signal_posted,
 )
 
-logger = logging.getLogger("apex.engine")
+logger = logging.getLogger(__name__)
 
 _DELIVERED_SIGNAL_KEYS: set[str] = set()
 _DELIVERED_LOCK = threading.Lock()
 
 
 def is_signal_delivered(signal_key: str) -> bool:
+    """Return True if this signal has already been delivered."""
+    if not signal_key:
+        return False
+
     with _DELIVERED_LOCK:
         return signal_key in _DELIVERED_SIGNAL_KEYS
 
 
-def mark_signal_delivered(signal_key: str) -> None:
+def mark_signal_delivered(signal: dict[str, Any]) -> bool:
+    """Mark a signal as delivered."""
+    signal_key = get_signal_key(signal)
+
     if not signal_key:
-        return
+        return False
+
     with _DELIVERED_LOCK:
+        if signal_key in _DELIVERED_SIGNAL_KEYS:
+            return False
+
         _DELIVERED_SIGNAL_KEYS.add(signal_key)
+        return True
 
 
 def remove_signal_from_cache(signal_key: str) -> None:
+    """Remove a signal from the in-memory delivery cache."""
+    if not signal_key:
+        return
+
     with _DELIVERED_LOCK:
         _DELIVERED_SIGNAL_KEYS.discard(signal_key)
 
 
 def delivered_signal_count() -> int:
+    """Return the number of signals stored in the current cache."""
     with _DELIVERED_LOCK:
         return len(_DELIVERED_SIGNAL_KEYS)
 
 
 def clear_delivered_signals() -> None:
+    """Clear the in-memory signal cache."""
     with _DELIVERED_LOCK:
         _DELIVERED_SIGNAL_KEYS.clear()
 
 
-def scan_free_market(symbol: str, interval: str = "15min") -> Optional[dict[str, Any]]:
-    signal = generate_free_signal(symbol, interval=interval)
+def scan_free_market(symbol: str) -> Optional[dict[str, Any]]:
+    """Generate a free-channel eligible signal."""
+    try:
+        return generate_free_signal(symbol)
+    except Exception:
+        logger.exception("Free signal generation failed for %s", symbol)
+        return None
+
+
+def scan_vip_market(symbol: str) -> Optional[dict[str, Any]]:
+    """Generate a VIP eligible signal."""
+    try:
+        return generate_vip_signal(symbol)
+    except Exception:
+        logger.exception("VIP signal generation failed for %s", symbol)
+        return None
+
+
+def prepare_free_signal(symbol: str) -> Optional[dict[str, Any]]:
+    """Generate a free signal and reject duplicates."""
+    signal = scan_free_market(symbol)
+
     if not signal:
         return None
-    key = get_signal_key(signal)
-    if is_signal_delivered(key):
+
+    signal_key = get_signal_key(signal)
+
+    if is_signal_delivered(signal_key):
         return None
+
     return signal
 
 
-def scan_vip_market(symbol: str, interval: str = "15min") -> Optional[dict[str, Any]]:
-    signal = generate_vip_signal(symbol, interval=interval)
+def prepare_vip_signal(symbol: str) -> Optional[dict[str, Any]]:
+    """Generate a VIP signal and reject duplicates."""
+    signal = scan_vip_market(symbol)
+
     if not signal:
         return None
-    key = get_signal_key(signal)
-    if is_signal_delivered(key):
+
+    signal_key = get_signal_key(signal)
+
+    if is_signal_delivered(signal_key):
         return None
+
     return signal
 
 
-def prepare_free_signal(symbol: str, interval: str = "15min") -> Optional[dict[str, Any]]:
-    return scan_free_market(symbol, interval=interval)
+def confirm_signal_delivery(signal: dict[str, Any]) -> bool:
+    """Confirm that a signal was successfully delivered."""
+    if not signal:
+        return False
 
+    signal_key = get_signal_key(signal)
 
-def prepare_vip_signal(symbol: str, interval: str = "15min") -> Optional[dict[str, Any]]:
-    return scan_vip_market(symbol, interval=interval)
+    if not signal_key:
+        return False
 
+    newly_marked = mark_signal_delivered(signal)
 
-def confirm_signal_delivery(signal: dict[str, Any]) -> None:
-    key = get_signal_key(signal)
-    mark_signal_delivered(key)
-    symbol = str(signal.get("symbol") or "")
+    if not newly_marked:
+        return False
+
+    symbol = signal.get("symbol")
+
     if symbol:
-        mark_signal_posted(symbol)
+        try:
+            mark_signal_posted(str(symbol))
+        except Exception:
+            logger.exception("Failed to increment daily signal counter for %s", symbol)
+
+    return True
 
 
 def signal_summary(signal: dict[str, Any]) -> dict[str, Any]:
+    """Return a compact, safe summary for logging/admin tools."""
     return {
         "signal_key": get_signal_key(signal),
         "symbol": signal.get("symbol"),
@@ -96,45 +153,36 @@ def signal_summary(signal: dict[str, Any]) -> dict[str, Any]:
 
 
 def prune_old_signal_keys(max_items: int = 5000) -> None:
+    """Safety valve for long-running processes."""
     try:
         max_items = int(max_items)
     except (TypeError, ValueError):
         max_items = 5000
+
     if max_items < 100:
         max_items = 100
 
     with _DELIVERED_LOCK:
-        if len(_DELIVERED_SIGNAL_KEYS) <= max_items:
+        current_size = len(_DELIVERED_SIGNAL_KEYS)
+
+        if current_size <= max_items:
             return
+
         keys = list(_DELIVERED_SIGNAL_KEYS)
         _DELIVERED_SIGNAL_KEYS.clear()
         _DELIVERED_SIGNAL_KEYS.update(keys[-max_items:])
 
 
 def engine_status() -> dict[str, Any]:
+    """Return basic engine status information."""
     with _DELIVERED_LOCK:
         cached = len(_DELIVERED_SIGNAL_KEYS)
+
     return {
         "status": "operational",
         "cached_delivered_signals": cached,
-        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "checked_at": datetime.now(timezone.utc),
     }
-
-
-class SignalManager:
-    """Thin OOP wrapper around module-level scan helpers."""
-
-    def scan_free(self, symbol: str, interval: str = "15min") -> Optional[dict[str, Any]]:
-        return scan_free_market(symbol, interval=interval)
-
-    def scan_vip(self, symbol: str, interval: str = "15min") -> Optional[dict[str, Any]]:
-        return scan_vip_market(symbol, interval=interval)
-
-    def confirm(self, signal: dict[str, Any]) -> None:
-        confirm_signal_delivery(signal)
-
-    def status(self) -> dict[str, Any]:
-        return engine_status()
 
 
 __all__ = [
@@ -151,5 +199,4 @@ __all__ = [
     "signal_summary",
     "prune_old_signal_keys",
     "engine_status",
-    "SignalManager",
 ]
