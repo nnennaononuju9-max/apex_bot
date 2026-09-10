@@ -29,8 +29,6 @@ from bot_handlers.commands import (
     papertrades_command,
     broadcast_command,
 )
-from bot_handlers.callbacks import menu_callback_router
-from bot_handlers.payments import payment_proof_message_handler
 from bot_handlers.admin import (
     setbank_command,
     setopay_command,
@@ -38,6 +36,9 @@ from bot_handlers.admin import (
     listcrypto_command,
     setvip_command,
     scancrypto_command,
+    pausesignals_command,
+    resumesignals_command,
+    signalstatus_command,
 )
 from utils.logging import setup_logging
 
