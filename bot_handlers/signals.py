@@ -22,9 +22,15 @@ def get_signal_key(signal: dict[str, Any]) -> str:
     signal_code = signal.get("signal_code")
     if signal_code:
         return str(signal_code)
+
     symbol = signal.get("symbol") or "unknown"
     direction = signal.get("direction") or ""
-    price = signal.get("price") or ""
+    price = (
+        signal.get("entry_price")
+        or signal.get("price")
+        or signal.get("current_price")
+        or ""
+    )
     return f"{symbol}:{direction}:{price}"
 
 
