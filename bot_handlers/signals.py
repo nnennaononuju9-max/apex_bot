@@ -40,9 +40,18 @@ def build_signal_message(signal: dict[str, Any], vip: bool = False) -> str:
 
     header = "👑💎 APEX VIP SIGNAL" if vip else "📡 APEX LIVE SIGNAL"
 
-    tp1_str = price_format(signal.get("tp1", signal.get("take_profit", 0)))
-    tp2_str = price_format(signal.get("tp2", signal.get("take_profit", 0)))
-    tp3_str = price_format(signal.get("tp3", signal.get("take_profit", 0)))
+    # Fixed: correctly reads entry_price
+    entry = price_format(
+        signal.get("entry_price")
+        or signal.get("price")
+        or signal.get("current_price")
+        or 0
+    )
+    stop_loss = price_format(signal.get("stop_loss") or 0)
+
+    tp1_str = price_format(signal.get("tp1") or signal.get("take_profit") or 0)
+    tp2_str = price_format(signal.get("tp2") or 0)
+    tp3_str = price_format(signal.get("tp3") or 0)
 
     if vip:
         tp_block = (
@@ -67,11 +76,9 @@ def build_signal_message(signal: dict[str, Any], vip: bool = False) -> str:
     strength = signal.get("strength") or ""
     direction = signal.get("direction") or ""
     symbol = signal.get("symbol") or ""
-    price = price_format(signal.get("price", 0))
-    stop_loss = price_format(signal.get("stop_loss", 0))
     score = signal.get("score", 0)
     max_score = signal.get("max_score", MAX_SIGNAL_SCORE)
-    timeframe = signal.get("timeframe", "15M + 1H")
+    timeframe = signal.get("timeframe") or signal.get("interval") or "15M + 1H"
     signal_code = signal.get("signal_code", "")
 
     return f"""
@@ -81,7 +88,7 @@ def build_signal_message(signal: dict[str, Any], vip: bool = False) -> str:
 {crypto_tag}
 
 💎 Pair: *{symbol}*
-💰 Entry: `{price}`
+💰 Entry: `{entry}`
 🛑 Stop Loss: `{stop_loss}`
 {tp_block}
 📊 Signal Score: *{score}/{max_score}*
