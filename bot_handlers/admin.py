@@ -181,3 +181,36 @@ async def scancrypto_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text(
             "⚪ No qualifying crypto setups right now (requires 70+ score)."
         )
+
+async def pausesignals_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin: /pausesignals — stop automatic signals"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Admin only.")
+        return
+
+    from database import set_signals_paused
+    set_signals_paused(True)
+    await update.message.reply_text("⏸ Signals have been *paused*. No new signals will be sent.", parse_mode="Markdown")
+
+
+async def resumesignals_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin: /resumesignals — allow automatic signals again"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Admin only.")
+        return
+
+    from database import set_signals_paused
+    set_signals_paused(False)
+    await update.message.reply_text("▶️ Signals have been *resumed*. Bot will start sending again.", parse_mode="Markdown")
+
+
+async def signalstatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin: /signalstatus — check if signals are paused"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Admin only.")
+        return
+
+    from database import are_signals_paused
+    paused = are_signals_paused()
+    status = "⏸ *PAUSED*" if paused else "▶️ *ACTIVE*"
+    await update.message.reply_text(f"📡 Signal Status: {status}", parse_mode="Markdown")
