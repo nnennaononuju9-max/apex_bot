@@ -29,6 +29,8 @@ from bot_handlers.commands import (
     papertrades_command,
     broadcast_command,
 )
+from bot_handlers.callbacks import menu_callback_router
+from bot_handlers.payments import payment_proof_message_handler
 from bot_handlers.admin import (
     setbank_command,
     setopay_command,
