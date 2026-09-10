@@ -91,26 +91,26 @@ def main() -> None:
     application.add_handler(CommandHandler("broadcast", broadcast_command))
 
     # ---- Admin commands ----
-application.add_handler(CommandHandler("setvip", setvip_command))
-application.add_handler(CommandHandler("setbank", setbank_command))
-application.add_handler(CommandHandler("setopay", setopay_command))
-application.add_handler(CommandHandler("addcrypto", addcrypto_command))
-application.add_handler(CommandHandler("listcrypto", listcrypto_command))
-application.add_handler(CommandHandler("scancrypto", scancrypto_command))
-application.add_handler(CommandHandler("pausesignals", pausesignals_command))
-application.add_handler(CommandHandler("resumesignals", resumesignals_command))
-application.add_handler(CommandHandler("signalstatus", signalstatus_command))
+    application.add_handler(CommandHandler("setvip", setvip_command))
+    application.add_handler(CommandHandler("setbank", setbank_command))
+    application.add_handler(CommandHandler("setopay", setopay_command))
+    application.add_handler(CommandHandler("addcrypto", addcrypto_command))
+    application.add_handler(CommandHandler("listcrypto", listcrypto_command))
+    application.add_handler(CommandHandler("scancrypto", scancrypto_command))
+    application.add_handler(CommandHandler("pausesignals", pausesignals_command))
+    application.add_handler(CommandHandler("resumesignals", resumesignals_command))
+    application.add_handler(CommandHandler("signalstatus", signalstatus_command))
 
     # ---- Callbacks ----
     application.add_handler(CallbackQueryHandler(menu_callback_router))
 
-    # ---- Payment proof (text or photo while user has pending payment) ----
+    # ---- Payment proof ----
     application.add_handler(
         MessageHandler(
-            (filters.TEXT & ~filters.COMMAND) | filters.PHOTO,
+            (filters.TEXT & \~filters.COMMAND) | filters.PHOTO,
             payment_proof_message_handler,
         )
-    )
+)
 
     # ---- Jobs ----
     application.job_queue.run_repeating(
