@@ -11,7 +11,7 @@ from .signal_generator import (
     mark_signal_posted,
     market_can_receive_signal,
 )
-from .signal_manager import SignalManager
+# SignalManager removed — class does not exist
 
 __all__ = [
     "get_data",
@@ -28,5 +28,4 @@ __all__ = [
     "generate_vip_signal",
     "mark_signal_posted",
     "market_can_receive_signal",
-    "SignalManager",
 ]
