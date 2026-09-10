@@ -54,15 +54,22 @@ def create_signal(
     interval: str = "15min",
 ) -> Optional[dict[str, Any]]:
     """
-    Build a signal for a market if score meets minimum_score.
-    Returns None when data/score is insufficient.
+    Build a signal using:
+    - 15-minute indicators for entry confirmation
+    - 1-hour EMA trend confirmation
+    - scoring.py's current scoring interface
     """
     symbol = str(symbol).strip().upper()
+
     if "/" not in symbol and len(symbol) == 6:
-        # e.g. EURUSD -> EUR/USD heuristic
         symbol = symbol[:3] + "/" + symbol[3:]
 
+    # --------------------------------------------------------
+    # 1. Get lower-timeframe data
+    # --------------------------------------------------------
+
     df = get_data(symbol, interval=interval)
+
     if df is None or df.empty:
         return None
 
@@ -71,39 +78,114 @@ def create_signal(
     except Exception:
         return None
 
-    row = _latest_row(df)
-    close = float(row.get("close") or 0)
-    ema9 = float(row.get("ema9") or 0)
-    ema21 = float(row.get("ema21") or 0)
-    rsi = float(row.get("rsi") or 0)
-    macd = float(row.get("macd") or 0)
-    macd_signal = float(row.get("macd_signal") or row.get("macd_sig") or 0)
-    atr = float(row.get("atr") or 0)
-
-    if close <= 0 or atr <= 0:
+    if len(df) < 2:
         return None
 
-    # Direction from EMA trend
-    if ema9 > ema21:
-        direction = "BUY"
-    elif ema9 < ema21:
-        direction = "SELL"
-    else:
+    # --------------------------------------------------------
+    # 2. Get latest 15M indicator values
+    # --------------------------------------------------------
+
+    try:
+        row = df.iloc[-1]
+        previous_row = df.iloc[-2]
+
+        close = float(row["close"])
+        candle_open = float(row["open"])
+
+        ema9 = float(row["ema9"])
+        ema21 = float(row["ema21"])
+        rsi = float(row["rsi"])
+        macd = float(row["macd"])
+        macd_signal = float(row["macd_signal"])
+        atr = float(row["atr"])
+
+        previous_macd = float(previous_row["macd"])
+        previous_macd_signal = float(
+            previous_row["macd_signal"]
+        )
+
+    except (TypeError, ValueError, KeyError):
         return None
 
-    score, reasons = score_signal(
-        direction=direction,
-        ema9=ema9,
-        ema21=ema21,
-        rsi=rsi,
-        macd=macd,
-        macd_signal=macd_signal,
-        atr=atr,
-        close=close,
-    )
-
-    if score < int(minimum_score):
+    if (
+        close <= 0
+        or atr <= 0
+        or pd.isna(ema9)
+        or pd.isna(ema21)
+        or pd.isna(rsi)
+        or pd.isna(macd)
+        or pd.isna(macd_signal)
+        or pd.isna(previous_macd)
+        or pd.isna(previous_macd_signal)
+    ):
         return None
+
+    # --------------------------------------------------------
+    # 3. Get higher-timeframe (1H) data
+    # --------------------------------------------------------
+
+    try:
+        higher_df = get_data(
+            symbol,
+            interval="1h",
+        )
+
+        if higher_df is None or higher_df.empty:
+            return None
+
+        higher_df = calculate_indicators(higher_df)
+
+        higher_row = higher_df.iloc[-1]
+
+        higher_ema9 = float(higher_row["ema9"])
+        higher_ema21 = float(higher_row["ema21"])
+
+    except (TypeError, ValueError, KeyError, IndexError):
+        return None
+    except Exception:
+        return None
+
+    if (
+        pd.isna(higher_ema9)
+        or pd.isna(higher_ema21)
+    ):
+        return None
+
+    # --------------------------------------------------------
+    # 4. Run the current scoring engine
+    # --------------------------------------------------------
+
+    try:
+        scoring = score_signal(
+            ema9=ema9,
+            ema21=ema21,
+            higher_ema9=higher_ema9,
+            higher_ema21=higher_ema21,
+            rsi=rsi,
+            macd=macd,
+            macd_signal=macd_signal,
+            previous_macd=previous_macd,
+            previous_macd_signal=previous_macd_signal,
+            candle_open=candle_open,
+            candle_close=close,
+            minimum_score=int(minimum_score),
+        )
+    except Exception:
+        return None
+
+    if not scoring.get("valid"):
+        return None
+
+    direction = scoring.get("direction")
+    score = int(scoring.get("score") or 0)
+    reasons = scoring.get("reasons") or []
+
+    if not direction or score < int(minimum_score):
+        return None
+
+    # --------------------------------------------------------
+    # 5. Build risk profile
+    # --------------------------------------------------------
 
     try:
         risk = build_risk_profile(
@@ -114,41 +196,54 @@ def create_signal(
     except Exception:
         return None
 
-    is_crypto = symbol in CRYPTO_SYMBOL_MAP or symbol.replace("/", "") in {
-        v.replace("USDT", "/USD") for v in CRYPTO_SYMBOL_MAP.values()
-    }
+    # --------------------------------------------------------
+    # 6. Determine whether this is crypto
+    # --------------------------------------------------------
+
     is_crypto = symbol in CRYPTO_SYMBOL_MAP
+
+    # --------------------------------------------------------
+    # 7. Build final signal
+    # --------------------------------------------------------
 
     signal = {
         "symbol": symbol,
         "direction": direction,
-        "score": int(score),
+        "score": score,
         "strength": get_strength(score),
         "reasons": reasons,
+
         "entry_price": risk["entry_price"],
         "stop_loss": risk["stop_loss"],
         "tp1": risk["tp1"],
         "tp2": risk["tp2"],
         "tp3": risk["tp3"],
+
         "rr_tp1": risk.get("rr_tp1"),
         "rr_tp2": risk.get("rr_tp2"),
         "rr_tp3": risk.get("rr_tp3"),
+
         "atr": atr,
         "rsi": rsi,
         "ema9": ema9,
         "ema21": ema21,
+        "higher_ema9": higher_ema9,
+        "higher_ema21": higher_ema21,
         "macd": macd,
         "macd_signal": macd_signal,
+
         "is_crypto": is_crypto,
         "interval": interval,
+
         "signal_code": create_signal_code(),
         "chart_url": build_chart_url(symbol),
         "generated_at": datetime.now(timezone.utc).isoformat(),
+
         "max_score": MAX_SCORE,
         "minimum_score": int(minimum_score),
     }
-    return signal
 
+    return signal
 
 def market_can_receive_signal(symbol: str) -> bool:
     """Respect per-market daily signal limit."""
