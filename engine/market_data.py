@@ -7,7 +7,6 @@ import requests
 
 from config import (
     TWELVE_DATA_API_KEY,
-    BINANCE_API_KEY,
     CANDLE_LIMIT,
 )
 
@@ -17,15 +16,14 @@ from config import (
 # ============================================================
 
 CRYPTO_SYMBOL_MAP = {
-    "BTC/USD": "BTCUSDT",
-    "ETH/USD": "ETHUSDT",
-    "SOL/USD": "SOLUSDT",
-    "BNB/USD": "BNBUSDT",
-    "XRP/USD": "XRPUSDT",
-    "DOGE/USD": "DOGEUSDT",
-    "ADA/USD": "ADAUSDT",
+    "BTC/USD": "BTC-USD",
+    "ETH/USD": "ETH-USD",
+    "SOL/USD": "SOL-USD",
+    "BNB/USD": "BNB-USD",
+    "XRP/USD": "XRP-USD",
+    "DOGE/USD": "DOGE-USD",
+    "ADA/USD": "ADA-USD",
 }
-
 
 FOREX_AND_COMMODITIES = [
     "XAU/USD",
@@ -33,7 +31,6 @@ FOREX_AND_COMMODITIES = [
     "GBP/USD",
     "USD/JPY",
 ]
-
 
 ALL_MARKETS = [
     *CRYPTO_SYMBOL_MAP.keys(),
@@ -47,9 +44,10 @@ MARKETS = ALL_MARKETS
 # TIMEFRAME ROUTING
 # ============================================================
 
-BINANCE_INTERVAL_MAP = {
-    "15min": "15m",
-    "1h": "1h",
+# Coinbase uses seconds for candle granularity.
+COINBASE_INTERVAL_MAP = {
+    "15min": 900,
+    "1h": 3600,
 }
 
 
@@ -57,8 +55,8 @@ BINANCE_INTERVAL_MAP = {
 # API ENDPOINTS
 # ============================================================
 
-BINANCE_KLINES_URL = (
-    "https://api.binance.com/api/v3/klines"
+COINBASE_CANDLES_URL = (
+    "https://api.exchange.coinbase.com/products/{}/candles"
 )
 
 TWELVE_DATA_URL = (
@@ -67,17 +65,17 @@ TWELVE_DATA_URL = (
 
 
 # ============================================================
-# BINANCE DATA
+# COINBASE CRYPTO DATA
 # ============================================================
 
-def get_data_binance(
+def get_data_coinbase(
     symbol: str,
     interval: str,
 ) -> Optional[pd.DataFrame]:
     """
-    Fetch OHLCV candle data from Binance.
+    Fetch OHLCV candle data from Coinbase Exchange.
 
-    Used for:
+    Used for crypto markets:
         BTC/USD
         ETH/USD
         SOL/USD
@@ -87,36 +85,38 @@ def get_data_binance(
         ADA/USD
     """
 
-    binance_symbol = CRYPTO_SYMBOL_MAP.get(symbol)
+    coinbase_symbol = CRYPTO_SYMBOL_MAP.get(symbol)
 
-    if not binance_symbol:
+    if not coinbase_symbol:
         print(
-            f"⚠️ No Binance symbol mapping for {symbol}"
+            f"⚠️ No Coinbase symbol mapping for {symbol}"
         )
         return None
 
-    binance_interval = BINANCE_INTERVAL_MAP.get(
-        interval,
-        interval,
-    )
+    granularity = COINBASE_INTERVAL_MAP.get(interval)
 
-    params = {
-        "symbol": binance_symbol,
-        "interval": binance_interval,
-        "limit": CANDLE_LIMIT,
-    }
+    if granularity is None:
+        print(
+            f"⚠️ Unsupported Coinbase interval: "
+            f"{interval}"
+        )
+        return None
 
-    headers = {}
-
-    if BINANCE_API_KEY:
-        headers["X-MBX-APIKEY"] = BINANCE_API_KEY
+    # Coinbase permits a maximum of 300 candles.
+    limit = min(int(CANDLE_LIMIT), 300)
 
     try:
         response = requests.get(
-            BINANCE_KLINES_URL,
-            params=params,
-            headers=headers or None,
-            timeout=15,
+            COINBASE_CANDLES_URL.format(
+                coinbase_symbol
+            ),
+            params={
+                "granularity": granularity,
+            },
+            headers={
+                "Accept": "application/json",
+            },
+            timeout=20,
         )
 
         response.raise_for_status()
@@ -125,24 +125,27 @@ def get_data_binance(
 
         if not isinstance(raw, list) or not raw:
             print(
-                f"⚪ Binance returned no data: "
+                f"⚪ Coinbase returned no data: "
                 f"{symbol} {interval}"
             )
             return None
 
+        # Coinbase candle format:
+        # [
+        #   time,
+        #   low,
+        #   high,
+        #   open,
+        #   close,
+        #   volume
+        # ]
         columns = [
-            "open_time",
-            "open",
-            "high",
+            "timestamp",
             "low",
+            "high",
+            "open",
             "close",
             "volume",
-            "close_time",
-            "quote_asset_volume",
-            "num_trades",
-            "taker_buy_base",
-            "taker_buy_quote",
-            "ignore",
         ]
 
         df = pd.DataFrame(
@@ -151,12 +154,12 @@ def get_data_binance(
         )
 
         # ----------------------------------------------------
-        # Convert timestamps
+        # Convert timestamp
         # ----------------------------------------------------
 
         df["datetime"] = pd.to_datetime(
-            df["open_time"],
-            unit="ms",
+            df["timestamp"],
+            unit="s",
             utc=True,
             errors="coerce",
         )
@@ -178,7 +181,7 @@ def get_data_binance(
             )
 
         # ----------------------------------------------------
-        # Keep only columns required by the engine
+        # Keep required engine columns
         # ----------------------------------------------------
 
         df = df[
@@ -211,9 +214,13 @@ def get_data_binance(
             .reset_index(drop=True)
         )
 
+        # Keep the newest requested candles.
+        if len(df) > limit:
+            df = df.tail(limit).reset_index(drop=True)
+
         if len(df) < 50:
             print(
-                f"⚪ Not enough Binance candles: "
+                f"⚪ Not enough Coinbase candles: "
                 f"{symbol} {interval} "
                 f"({len(df)})"
             )
@@ -223,21 +230,21 @@ def get_data_binance(
 
     except requests.RequestException as error:
         print(
-            f"❌ Binance request error "
+            f"❌ Coinbase request error "
             f"{symbol} {interval}: {error}"
         )
         return None
 
     except ValueError as error:
         print(
-            f"❌ Binance response parsing error "
+            f"❌ Coinbase response parsing error "
             f"{symbol} {interval}: {error}"
         )
         return None
 
     except Exception as error:
         print(
-            f"❌ Unexpected Binance error "
+            f"❌ Unexpected Coinbase error "
             f"{symbol} {interval}: {error}"
         )
         return None
@@ -423,14 +430,14 @@ def get_data(
     """
     Universal market-data router.
 
-    Crypto -> Binance
+    Crypto -> Coinbase
     Forex/Gold -> Twelve Data
     """
 
     symbol = symbol.upper().strip()
 
     if symbol in CRYPTO_SYMBOL_MAP:
-        return get_data_binance(
+        return get_data_coinbase(
             symbol,
             interval,
         )
