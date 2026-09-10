@@ -107,11 +107,10 @@ def main() -> None:
     # ---- Payment proof ----
     application.add_handler(
         MessageHandler(
-            (filters.TEXT | filters.PHOTO) & \~filters.COMMAND,
+            filters.TEXT | filters.PHOTO,
             payment_proof_message_handler,
         )
     )
-
     # ---- Jobs ----
     application.job_queue.run_repeating(
         automatic_signal_job,
