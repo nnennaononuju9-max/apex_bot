@@ -11,16 +11,24 @@ from psycopg.rows import dict_row
 
 import config
 
+
 # ============================================================
 # DATABASE CONNECTION
 # ============================================================
 
-DATABASE_URL = os.getenv("DATABASE_URL", "") or getattr(config, "DATABASE_URL", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "") or getattr(
+    config,
+    "DATABASE_URL",
+    "",
+)
 
 
 def get_connection():
     if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL environment variable is missing.")
+        raise RuntimeError(
+            "DATABASE_URL environment variable is missing."
+        )
+
     return psycopg.connect(
         DATABASE_URL,
         row_factory=dict_row,
@@ -33,12 +41,19 @@ def get_connection():
 
 def init_db():
     if not DATABASE_URL:
-        print("[WARN] No DATABASE_URL provided. Database initialization skipped.")
+        print(
+            "[WARN] No DATABASE_URL provided. "
+            "Database initialization skipped."
+        )
         return
 
     with get_connection() as conn:
         with conn.cursor() as cur:
-            # Users table
+
+            # ==================================================
+            # USERS
+            # ==================================================
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id BIGSERIAL PRIMARY KEY,
@@ -57,14 +72,20 @@ def init_db():
             """)
 
             cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id);
+                CREATE INDEX IF NOT EXISTS idx_users_telegram_id
+                ON users(telegram_id);
             """)
 
-            # VIP Subscriptions table
+            # ==================================================
+            # VIP SUBSCRIPTIONS
+            # ==================================================
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS vip_subscriptions (
                     id BIGSERIAL PRIMARY KEY,
-                    user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL
+                        REFERENCES users(telegram_id)
+                        ON DELETE CASCADE,
                     start_date TIMESTAMPTZ NOT NULL,
                     expiry_date TIMESTAMPTZ NOT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
@@ -77,21 +98,30 @@ def init_db():
 
             cur.execute("""
                 ALTER TABLE vip_subscriptions
-                ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'monthly';
+                ADD COLUMN IF NOT EXISTS plan
+                TEXT NOT NULL DEFAULT 'monthly';
             """)
 
             cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_vip_subscriptions_user ON vip_subscriptions(user_id);
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_vip_subscriptions_expiry ON vip_subscriptions(expiry_date);
+                CREATE INDEX IF NOT EXISTS idx_vip_subscriptions_user
+                ON vip_subscriptions(user_id);
             """)
 
-            # Payments table
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_vip_subscriptions_expiry
+                ON vip_subscriptions(expiry_date);
+            """)
+
+            # ==================================================
+            # PAYMENTS
+            # ==================================================
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS payments (
                     id BIGSERIAL PRIMARY KEY,
-                    user_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL
+                        REFERENCES users(telegram_id)
+                        ON DELETE CASCADE,
                     amount NUMERIC(18, 2) NOT NULL,
                     currency TEXT NOT NULL DEFAULT 'NGN',
                     plan TEXT NOT NULL DEFAULT 'monthly',
@@ -115,25 +145,40 @@ def init_db():
             """)
 
             cur.execute("""
-                ALTER TABLE payments ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'monthly';
+                ALTER TABLE payments
+                ADD COLUMN IF NOT EXISTS plan
+                TEXT NOT NULL DEFAULT 'monthly';
             """)
+
             cur.execute("""
-                ALTER TABLE payments ADD COLUMN IF NOT EXISTS duration_days INTEGER NOT NULL DEFAULT 30;
+                ALTER TABLE payments
+                ADD COLUMN IF NOT EXISTS duration_days
+                INTEGER NOT NULL DEFAULT 30;
             """)
 
             cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_payments_user ON payments(user_id);
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
+                CREATE INDEX IF NOT EXISTS idx_payments_user
+                ON payments(user_id);
             """)
 
-            # Referrals table
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_payments_status
+                ON payments(status);
+            """)
+
+            # ==================================================
+            # REFERRALS
+            # ==================================================
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS referrals (
                     id BIGSERIAL PRIMARY KEY,
-                    referrer_id BIGINT NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
-                    referred_user_id BIGINT UNIQUE NOT NULL REFERENCES users(telegram_id) ON DELETE CASCADE,
+                    referrer_id BIGINT NOT NULL
+                        REFERENCES users(telegram_id)
+                        ON DELETE CASCADE,
+                    referred_user_id BIGINT UNIQUE NOT NULL
+                        REFERENCES users(telegram_id)
+                        ON DELETE CASCADE,
                     reward_days INTEGER DEFAULT 0,
                     reward_granted BOOLEAN DEFAULT FALSE,
                     rewarded_at TIMESTAMPTZ,
@@ -141,7 +186,10 @@ def init_db():
                 );
             """)
 
-            # Payment Settings table
+            # ==================================================
+            # PAYMENT SETTINGS
+            # ==================================================
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS payment_settings (
                     id INTEGER PRIMARY KEY DEFAULT 1,
@@ -159,42 +207,83 @@ def init_db():
 
             cur.execute("""
                 INSERT INTO payment_settings (
-                    id, opay_enabled, opay_name, opay_number,
-                    bank_enabled, bank_name, bank_account_name, bank_account_number,
+                    id,
+                    opay_enabled,
+                    opay_name,
+                    opay_number,
+                    bank_enabled,
+                    bank_name,
+                    bank_account_name,
+                    bank_account_number,
                     crypto_enabled
                 )
-                VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (
+                    1, %s, %s, %s, %s, %s, %s, %s, %s
+                )
                 ON CONFLICT (id) DO NOTHING;
             """, (
-                getattr(config, "OPAY_PAYMENTS_ENABLED", True),
+                getattr(
+                    config,
+                    "OPAY_PAYMENTS_ENABLED",
+                    True,
+                ),
                 getattr(config, "OPAY_NAME", None),
                 getattr(config, "OPAY_NUMBER", None),
-                getattr(config, "BANK_PAYMENTS_ENABLED", True),
+                getattr(
+                    config,
+                    "BANK_PAYMENTS_ENABLED",
+                    True,
+                ),
                 getattr(config, "BANK_NAME", None),
-                getattr(config, "BANK_ACCOUNT_NAME", None),
-                getattr(config, "BANK_ACCOUNT_NUMBER", None),
-                getattr(config, "CRYPTO_PAYMENTS_ENABLED", True),
+                getattr(
+                    config,
+                    "BANK_ACCOUNT_NAME",
+                    None,
+                ),
+                getattr(
+                    config,
+                    "BANK_ACCOUNT_NUMBER",
+                    None,
+                ),
+                getattr(
+                    config,
+                    "CRYPTO_PAYMENTS_ENABLED",
+                    True,
+                ),
             ))
 
-            # Backfill NULL bank/opay details on existing row (production fix)
+            # Backfill existing payment settings
             cur.execute("""
                 UPDATE payment_settings
                 SET
                     opay_name = COALESCE(opay_name, %s),
                     opay_number = COALESCE(opay_number, %s),
                     bank_name = COALESCE(bank_name, %s),
-                    bank_account_name = COALESCE(bank_account_name, %s),
-                    bank_account_number = COALESCE(bank_account_number, %s)
+                    bank_account_name =
+                        COALESCE(bank_account_name, %s),
+                    bank_account_number =
+                        COALESCE(bank_account_number, %s)
                 WHERE id = 1;
             """, (
                 getattr(config, "OPAY_NAME", None),
                 getattr(config, "OPAY_NUMBER", None),
                 getattr(config, "BANK_NAME", None),
-                getattr(config, "BANK_ACCOUNT_NAME", None),
-                getattr(config, "BANK_ACCOUNT_NUMBER", None),
+                getattr(
+                    config,
+                    "BANK_ACCOUNT_NAME",
+                    None,
+                ),
+                getattr(
+                    config,
+                    "BANK_ACCOUNT_NUMBER",
+                    None,
+                ),
             ))
 
-            # Crypto Options table
+            # ==================================================
+            # CRYPTO PAYMENT OPTIONS
+            # ==================================================
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS crypto_payment_options (
                     id BIGSERIAL PRIMARY KEY,
@@ -208,7 +297,10 @@ def init_db():
                 );
             """)
 
-            # Signal Daily Limits table
+            # ==================================================
+            # SIGNAL DAILY COUNTS
+            # ==================================================
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS signal_daily_counts (
                     id BIGSERIAL PRIMARY KEY,
@@ -220,77 +312,83 @@ def init_db():
                 );
             """)
 
-              # Paper trades
-cur.execute("""
-    CREATE TABLE IF NOT EXISTS paper_trades (
-        id BIGSERIAL PRIMARY KEY,
-        signal_code TEXT UNIQUE NOT NULL,
-        symbol TEXT NOT NULL,
-        direction TEXT NOT NULL,
-        signal_score INTEGER,
+            # ==================================================
+            # PAPER TRADES
+            # ==================================================
 
-        entry_price NUMERIC(30, 12) NOT NULL,
-        stop_loss NUMERIC(30, 12) NOT NULL,
-
-        tp1 NUMERIC(30, 12),
-        tp2 NUMERIC(30, 12),
-        tp3 NUMERIC(30, 12),
-
-        take_profit NUMERIC(30, 12) NOT NULL,
-
-        exit_price NUMERIC(30, 12),
-
-        result TEXT NOT NULL DEFAULT 'open',
-
-        tp1_hit BOOLEAN DEFAULT FALSE,
-        tp2_hit BOOLEAN DEFAULT FALSE,
-        breakeven_alerted BOOLEAN DEFAULT FALSE,
-
-        r_multiple NUMERIC(10, 4),
-
-        opened_at TIMESTAMPTZ DEFAULT NOW(),
-        closed_at TIMESTAMPTZ
-    );
-""")
-
-# Add new columns to existing databases
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp1 NUMERIC(30, 12);
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp2 NUMERIC(30, 12);
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp3 NUMERIC(30, 12);
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp1_hit BOOLEAN DEFAULT FALSE;
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp2_hit BOOLEAN DEFAULT FALSE;
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS breakeven_alerted BOOLEAN DEFAULT FALSE;
-""")
-
-            # Fix: add real flag so breakeven alert is only sent once
             cur.execute("""
-                ALTER TABLE paper_trades
-                ADD COLUMN IF NOT EXISTS breakeven_alerted BOOLEAN DEFAULT FALSE;
+                CREATE TABLE IF NOT EXISTS paper_trades (
+                    id BIGSERIAL PRIMARY KEY,
+                    signal_code TEXT UNIQUE NOT NULL,
+                    symbol TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    signal_score INTEGER,
+
+                    entry_price NUMERIC(30, 12) NOT NULL,
+                    stop_loss NUMERIC(30, 12) NOT NULL,
+
+                    tp1 NUMERIC(30, 12),
+                    tp2 NUMERIC(30, 12),
+                    tp3 NUMERIC(30, 12),
+
+                    take_profit NUMERIC(30, 12) NOT NULL,
+
+                    exit_price NUMERIC(30, 12),
+
+                    result TEXT NOT NULL DEFAULT 'open',
+
+                    tp1_hit BOOLEAN DEFAULT FALSE,
+                    tp2_hit BOOLEAN DEFAULT FALSE,
+                    breakeven_alerted BOOLEAN DEFAULT FALSE,
+
+                    r_multiple NUMERIC(10, 4),
+
+                    opened_at TIMESTAMPTZ DEFAULT NOW(),
+                    closed_at TIMESTAMPTZ
+                );
             """)
 
-            # Bot Settings
+            # Add newer columns to existing databases
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp1
+                NUMERIC(30, 12);
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp2
+                NUMERIC(30, 12);
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp3
+                NUMERIC(30, 12);
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp1_hit
+                BOOLEAN DEFAULT FALSE;
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp2_hit
+                BOOLEAN DEFAULT FALSE;
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS breakeven_alerted
+                BOOLEAN DEFAULT FALSE;
+            """)
+
+            # ==================================================
+            # BOT SETTINGS
+            # ==================================================
+
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS bot_settings (
                     key TEXT PRIMARY KEY,
@@ -300,6 +398,7 @@ cur.execute("""
             """)
 
         conn.commit()
+
     print("[OK] PostgreSQL database initialized.")
 
 
@@ -310,45 +409,90 @@ cur.execute("""
 def set_setting(key: str, value: str):
     if not DATABASE_URL:
         return
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO bot_settings (key, value, updated_at) VALUES (%s, %s, NOW())
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                INSERT INTO bot_settings (
+                    key,
+                    value,
+                    updated_at
+                )
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (key)
+                DO UPDATE SET
+                    value = EXCLUDED.value,
+                    updated_at = NOW()
             """, (key, value))
+
         conn.commit()
 
 
-def get_setting(key: str, default: Any = None) -> Any:
+def get_setting(
+    key: str,
+    default: Any = None,
+) -> Any:
     if not DATABASE_URL:
         return default
+
     with get_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT value FROM bot_settings WHERE key = %s", (key,))
+            cur.execute(
+                """
+                SELECT value
+                FROM bot_settings
+                WHERE key = %s
+                """,
+                (key,),
+            )
+
             res = cur.fetchone()
+
             return res["value"] if res else default
 
 
 def set_free_channel(channel_id: str):
-    set_setting("free_channel_id", str(channel_id))
+    set_setting(
+        "free_channel_id",
+        str(channel_id),
+    )
 
 
 def get_free_channel() -> Optional[str]:
-    return get_setting("free_channel_id") or os.getenv("FREE_CHANNEL_ID")
+    return (
+        get_setting("free_channel_id")
+        or os.getenv("FREE_CHANNEL_ID")
+    )
 
 
 def set_vip_channel(channel_id: str):
-    set_setting("vip_channel_id", str(channel_id))
+    set_setting(
+        "vip_channel_id",
+        str(channel_id),
+    )
 
 
 def get_vip_channel() -> Optional[str]:
-    return get_setting("vip_channel_id") or os.getenv("VIP_CHANNEL_ID")
+    return (
+        get_setting("vip_channel_id")
+        or os.getenv("VIP_CHANNEL_ID")
+    )
 
 
 def set_signals_paused(paused: bool):
-    set_setting("signals_paused", "true" if paused else "false")
+    set_setting(
+        "signals_paused",
+        "true" if paused else "false",
+    )
 
 
 def are_signals_paused() -> bool:
-    return str(get_setting("signals_paused", "false")).lower() == "true"
-    
+    return (
+        str(
+            get_setting(
+                "signals_paused",
+                "false",
+            )
+        ).lower()
+        == "true"
+    )
