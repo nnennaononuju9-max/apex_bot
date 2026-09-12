@@ -49,22 +49,51 @@ def open_paper_trade(
     entry_price: float,
     stop_loss: float,
     take_profit: float,
+    tp1: float | None = None,
+    tp2: float | None = None,
+    tp3: float | None = None,
 ):
     if not DATABASE_URL:
         return None
+
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO paper_trades (
-                    signal_code, symbol, direction, signal_score,
-                    entry_price, stop_loss, take_profit, result
+                    signal_code,
+                    symbol,
+                    direction,
+                    signal_score,
+                    entry_price,
+                    stop_loss,
+                    tp1,
+                    tp2,
+                    tp3,
+                    take_profit,
+                    result
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, 'open')
+                VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'open'
+                )
                 ON CONFLICT (signal_code) DO NOTHING
                 RETURNING id
-            """, (signal_code, symbol, direction, signal_score, entry_price, stop_loss, take_profit))
+            """, (
+                signal_code,
+                symbol,
+                direction,
+                signal_score,
+                entry_price,
+                stop_loss,
+                tp1,
+                tp2,
+                tp3,
+                take_profit,
+            ))
+
             res = cur.fetchone()
+
         conn.commit()
+
     return res["id"] if res else None
 
 
@@ -169,4 +198,5 @@ def get_paper_trade_stats() -> dict[str, Any]:
                 "losses": row["losses"] or 0,
                 "win_rate": win_rate,
                 "total_r": round(float(row["total_r"] or 0), 2),
-            }
+    }
+    
