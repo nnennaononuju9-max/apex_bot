@@ -1,5 +1,5 @@
 """
-Paper trade monitor job — checks open simulated trades against live prices.
+Paper trade monitor job — monitors open simulated trades against live prices.
 """
 from __future__ import annotations
 
@@ -22,15 +22,30 @@ from engine import get_latest_price
 logger = logging.getLogger(__name__)
 
 
-async def paper_trade_monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+async def paper_trade_monitor_job(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
     """
-    Monitors all open paper trades, checks live prices against TP/SL,
-    updates the database, and alerts the channels.
+    Monitor all open paper trades.
+
+    Rules:
+    - BUY: TP above entry, SL below entry.
+    - SELL: TP below entry, SL above entry.
+    - TP = positive R.
+    - SL = -1R.
+    - Breakeven alert is sent once at 50% progress toward TP.
+    - Database remains the source of truth for trade state.
     """
+
     if not getattr(config, "PAPER_TRADING_ENABLED", True):
         return
 
-    open_trades = get_open_paper_trades()
+    try:
+        open_trades = get_open_paper_trades()
+    except Exception as err:
+        logger.error("Unable to load open paper trades: %s", err)
+        return
+
     if not open_trades:
         return
 
@@ -39,92 +54,258 @@ async def paper_trade_monitor_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for trade in open_trades:
         try:
-            symbol = trade["symbol"]
-            current_price = await asyncio.to_thread(get_latest_price, symbol)
-            if not current_price:
-                continue
-
+            trade_id = trade["id"]
+            symbol = str(trade["symbol"])
             direction = str(trade["direction"]).upper()
+
             entry = float(trade["entry_price"])
             sl = float(trade["stop_loss"])
             tp = float(trade["take_profit"])
-            trade_id = trade["id"]
+
+            current_price = await asyncio.to_thread(
+                get_latest_price,
+                symbol,
+            )
+
+            if current_price is None:
+                continue
+
+            current_price = float(current_price)
+
+            if current_price <= 0:
+                continue
+
+            # --------------------------------------------------
+            # Validate trade geometry
+            # --------------------------------------------------
+
+            if direction == "BUY":
+                if not (sl < entry < tp):
+                    logger.warning(
+                        "Invalid BUY trade geometry: id=%s symbol=%s "
+                        "entry=%s sl=%s tp=%s",
+                        trade_id,
+                        symbol,
+                        entry,
+                        sl,
+                        tp,
+                    )
+                    continue
+
+            elif direction == "SELL":
+                if not (tp < entry < sl):
+                    logger.warning(
+                        "Invalid SELL trade geometry: id=%s symbol=%s "
+                        "entry=%s sl=%s tp=%s",
+                        trade_id,
+                        symbol,
+                        entry,
+                        sl,
+                        tp,
+                    )
+                    continue
+
+            else:
+                logger.warning(
+                    "Unknown paper trade direction: %s",
+                    direction,
+                )
+                continue
+
+            # --------------------------------------------------
+            # Risk / reward
+            # --------------------------------------------------
+
+            risk = abs(entry - sl)
+            reward = abs(tp - entry)
+
+            if risk <= 0:
+                logger.warning(
+                    "Invalid zero-risk trade: id=%s symbol=%s",
+                    trade_id,
+                    symbol,
+                )
+                continue
+
+            full_tp_r = reward / risk
+
+            # --------------------------------------------------
+            # Check TP / SL
+            # --------------------------------------------------
 
             hit_tp = False
             hit_sl = False
 
             if direction == "BUY":
-                if current_price >= tp:
-                    hit_tp = True
-                elif current_price <= sl:
-                    hit_sl = True
+                hit_tp = current_price >= tp
+                hit_sl = current_price <= sl
+
             elif direction == "SELL":
-                if current_price <= tp:
-                    hit_tp = True
-                elif current_price >= sl:
-                    hit_sl = True
+                hit_tp = current_price <= tp
+                hit_sl = current_price >= sl
+
+            # --------------------------------------------------
+            # TAKE PROFIT
+            # --------------------------------------------------
 
             if hit_tp:
-                risk = abs(entry - sl)
-                reward = abs(tp - entry)
-                r_mult = round(reward / risk, 2) if risk > 0 else 1.5
-                close_paper_trade(trade_id, current_price, "tp_hit", r_mult)
+                r_multiple = round(full_tp_r, 2)
+
+                closed = close_paper_trade(
+                    trade_id=trade_id,
+                    exit_price=current_price,
+                    result="tp_hit",
+                    r_multiple=r_multiple,
+                )
+
+                # Another monitor cycle/process may have closed it.
+                if not closed:
+                    continue
 
                 alert = (
-                    f"🎯 *[PAPER TRADE: TAKE PROFIT HIT!]*\n\n"
+                    "🎯 *PAPER TRADE — TAKE PROFIT HIT!*\n\n"
                     f"• *Market:* #{symbol}\n"
-                    f"• *Direction:* {direction}\n"
-                    f"• *Entry Price:* `{entry}`\n"
-                    f"• *Exit Price:* `{current_price}`\n"
-                    f"• *Risk:Reward:* `+{r_mult}R` Profit!\n\n"
-                    f"✅ *Target reached smoothly.*"
+                    f"• *Direction:* `{direction}`\n"
+                    f"• *Entry:* `{entry}`\n"
+                    f"• *Exit:* `{current_price}`\n"
+                    f"• *Result:* `+{r_multiple}R`\n\n"
+                    "✅ *Take-profit target reached.*"
                 )
-                if vip_channel:
-                    await context.bot.send_message(
-                        chat_id=vip_channel, text=alert, parse_mode=ParseMode.MARKDOWN
-                    )
-                if free_channel:
-                    await context.bot.send_message(
-                        chat_id=free_channel, text=alert, parse_mode=ParseMode.MARKDOWN
-                    )
 
-            elif hit_sl:
-                close_paper_trade(trade_id, current_price, "sl_hit", -1.0)
+                await _send_trade_alert(
+                    context,
+                    alert,
+                    vip_channel,
+                    free_channel,
+                )
+
+                await asyncio.sleep(0.25)
+                continue
+
+            # --------------------------------------------------
+            # STOP LOSS
+            # --------------------------------------------------
+
+            if hit_sl:
+                closed = close_paper_trade(
+                    trade_id=trade_id,
+                    exit_price=current_price,
+                    result="sl_hit",
+                    r_multiple=-1.0,
+                )
+
+                if not closed:
+                    continue
+
                 alert = (
-                    f"🛑 *[PAPER TRADE: STOP LOSS HIT]*\n\n"
+                    "🛑 *PAPER TRADE — STOP LOSS HIT*\n\n"
                     f"• *Market:* #{symbol}\n"
-                    f"• *Direction:* {direction}\n"
-                    f"• *Entry Price:* `{entry}`\n"
-                    f"• *Exit Price:* `{current_price}`\n"
-                    f"• *Result:* `-1.0R` (Capital preserved)"
+                    f"• *Direction:* `{direction}`\n"
+                    f"• *Entry:* `{entry}`\n"
+                    f"• *Exit:* `{current_price}`\n"
+                    f"• *Result:* `-1.00R`\n\n"
+                    "📉 *Trade closed at the defined risk level.*"
                 )
+
+                # SL results go to VIP only, matching your
+                # existing behaviour.
                 if vip_channel:
-                    await context.bot.send_message(
-                        chat_id=vip_channel, text=alert, parse_mode=ParseMode.MARKDOWN
+                    await _send_message(
+                        context,
+                        vip_channel,
+                        alert,
                     )
 
-            else:
-                # Auto Breakeven Alert when halfway to TP
-                progress = 0.0
-                if direction == "BUY" and tp > entry:
-                    progress = (current_price - entry) / (tp - entry)
-                elif direction == "SELL" and entry > tp:
-                    progress = (entry - current_price) / (entry - tp)
+                await asyncio.sleep(0.25)
+                continue
 
-                if progress >= 0.5 and not trade.get("breakeven_alerted"):
-                    be_msg = (
-                        f"🛡️ *[MOVE STOP LOSS TO BREAKEVEN]*\n\n"
-                        f"• *Market:* #{symbol} ({direction})\n"
-                        f"• *Current Gain:* `+{round(progress * 100)}%` towards Take Profit!\n"
-                        f"• *Action:* Shift your Stop Loss to your Entry price `{entry}` now.\n"
-                        f"• *Result:* Your trade is now **100% Risk-Free**."
+            # --------------------------------------------------
+            # BREAKEVEN / TRADE PROGRESS
+            # --------------------------------------------------
+
+            progress = 0.0
+
+            if direction == "BUY":
+                progress = (current_price - entry) / (tp - entry)
+
+            elif direction == "SELL":
+                progress = (entry - current_price) / (entry - tp)
+
+            progress = max(0.0, min(progress, 1.0))
+
+            # At 50% progress, send one alert.
+            if progress >= 0.50 and not trade.get("breakeven_alerted"):
+                progress_percent = round(progress * 100)
+
+                be_msg = (
+                    "🛡️ *PAPER TRADE — BREAKEVEN ALERT*\n\n"
+                    f"• *Market:* #{symbol}\n"
+                    f"• *Direction:* `{direction}`\n"
+                    f"• *Entry:* `{entry}`\n"
+                    f"• *Current Price:* `{current_price}`\n"
+                    f"• *TP Progress:* `{progress_percent}%`\n\n"
+                    f"⚠️ *Consider moving SL to entry:* `{entry}`\n"
+                    "This would reduce the remaining downside risk."
+                )
+
+                if vip_channel:
+                    await _send_message(
+                        context,
+                        vip_channel,
+                        be_msg,
                     )
-                    if vip_channel:
-                        await context.bot.send_message(
-                            chat_id=vip_channel, text=be_msg, parse_mode=ParseMode.MARKDOWN
-                        )
-                    mark_breakeven_alerted(trade_id)
 
-            await asyncio.sleep(0.5)
+                mark_breakeven_alerted(trade_id)
+
+            await asyncio.sleep(0.25)
+
         except Exception as err:
-            logger.error("Paper trade monitor error on %s: %s", trade.get("symbol"), err)
+            logger.exception(
+                "Paper trade monitor error on %s: %s",
+                trade.get("symbol", "UNKNOWN"),
+            )
+
+
+async def _send_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: str,
+    text: str,
+) -> None:
+    """Safely send a Telegram message."""
+
+    try:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True,
+        )
+    except Exception as err:
+        logger.error(
+            "Failed to send paper trade alert to %s: %s",
+            chat_id,
+            err,
+        )
+
+
+async def _send_trade_alert(
+    context: ContextTypes.DEFAULT_TYPE,
+    text: str,
+    vip_channel: str | None,
+    free_channel: str | None,
+) -> None:
+    """Send TP alerts to VIP and free channels."""
+
+    if vip_channel:
+        await _send_message(
+            context,
+            vip_channel,
+            text,
+        )
+
+    if free_channel:
+        await _send_message(
+            context,
+            free_channel,
+            text,
+        )
