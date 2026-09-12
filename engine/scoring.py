@@ -8,13 +8,7 @@ from typing import Any, Dict, List, Tuple
 # Purpose:
 # Convert technical conditions into a consistent 0-110 score.
 #
-# This file does NOT:
-# - fetch market data
-# - calculate indicators
-# - send Telegram messages
-# - access PostgreSQL
-#
-# Those responsibilities belong to other modules.
+# Higher scores require stronger multi-timeframe confluence.
 # ============================================================
 
 WEAK_MIN = 70
@@ -27,7 +21,6 @@ MAX_SCORE = 110
 
 
 def get_strength(score: int) -> str | None:
-    """Return the human-readable strength level for a signal."""
     score = int(score)
 
     if score >= STRONGER_MIN:
@@ -49,8 +42,67 @@ def get_strength(score: int) -> str | None:
 
 
 def clamp_score(score: int) -> int:
-    """Keep a score safely inside the 0-110 range."""
     return max(0, min(int(score), MAX_SCORE))
+
+
+def _rsi_score(rsi: float) -> tuple[str | None, int, str]:
+    """
+    More selective RSI scoring.
+
+    Neutral RSI should not receive a full momentum score.
+    Extreme RSI is also not automatically treated as strong momentum.
+    """
+    if 55 <= rsi <= 65:
+        return "BUY", 15, f"RSI strong bullish momentum ({rsi:.1f})"
+
+    if 50 <= rsi < 55:
+        return "BUY", 8, f"RSI mild bullish momentum ({rsi:.1f})"
+
+    if 35 <= rsi <= 45:
+        return "SELL", 15, f"RSI strong bearish momentum ({rsi:.1f})"
+
+    if 45 < rsi < 50:
+        return "SELL", 8, f"RSI mild bearish momentum ({rsi:.1f})"
+
+    # Avoid awarding momentum points to extreme/overextended RSI.
+    return None, 0, ""
+
+
+def _candle_score(
+    candle_open: float,
+    candle_close: float,
+    atr: float | None = None,
+) -> tuple[str | None, int, str]:
+    """
+    Score candle confirmation according to candle strength.
+
+    A tiny green/red candle should not receive the same score
+    as a meaningful confirmation candle.
+    """
+    if candle_open <= 0 or candle_close <= 0:
+        return None, 0, ""
+
+    body = abs(candle_close - candle_open)
+
+    if atr is not None and atr > 0:
+        body_ratio = body / atr
+
+        if body_ratio >= 0.50:
+            points = 20
+        elif body_ratio >= 0.20:
+            points = 12
+        else:
+            points = 6
+    else:
+        points = 12
+
+    if candle_close > candle_open:
+        return "BUY", points, "15M candle confirms bullish price action"
+
+    if candle_close < candle_open:
+        return "SELL", points, "15M candle confirms bearish price action"
+
+    return None, 0, ""
 
 
 def score_direction(
@@ -66,30 +118,25 @@ def score_direction(
     previous_macd_signal: float,
     candle_open: float,
     candle_close: float,
+    atr: float | None = None,
 ) -> Tuple[str | None, int, List[str], List[str]]:
     """
     Score BUY and SELL conditions.
 
-    Maximum score:
-        25  = lower-timeframe EMA alignment
-        20  = higher-timeframe trend
+    Maximum possible score:
+        25  = 15M EMA alignment
+        20  = 1H trend alignment
         15  = RSI momentum
         20  = MACD direction
         10  = fresh MACD crossover
-        20  = confirmation candle
+        20  = candle confirmation
 
         TOTAL = 110
 
-    Returns:
-        (
-            direction,
-            score,
-            reasons,
-            opposite_reasons,
-        )
-
-    If neither side reaches a meaningful score, direction is None.
+    Important:
+    High scores now require genuine confluence.
     """
+
     buy_score = 0
     sell_score = 0
 
@@ -99,50 +146,69 @@ def score_direction(
     # --------------------------------------------------------
     # 1. LOWER TIMEFRAME EMA ALIGNMENT — 25 POINTS
     # --------------------------------------------------------
+
     if ema9 > ema21:
         buy_score += 25
-        buy_reasons.append("15M EMA bullish alignment (EMA9 > EMA21)")
+        buy_reasons.append(
+            "15M EMA bullish alignment (EMA9 > EMA21)"
+        )
 
     elif ema9 < ema21:
         sell_score += 25
-        sell_reasons.append("15M EMA bearish alignment (EMA9 < EMA21)")
+        sell_reasons.append(
+            "15M EMA bearish alignment (EMA9 < EMA21)"
+        )
 
     # --------------------------------------------------------
     # 2. HIGHER TIMEFRAME TREND — 20 POINTS
     # --------------------------------------------------------
+
     if higher_ema9 > higher_ema21:
         buy_score += 20
-        buy_reasons.append("1H higher-timeframe trend is bullish")
+        buy_reasons.append(
+            "1H higher-timeframe trend is bullish"
+        )
 
     elif higher_ema9 < higher_ema21:
         sell_score += 20
-        sell_reasons.append("1H higher-timeframe trend is bearish")
+        sell_reasons.append(
+            "1H higher-timeframe trend is bearish"
+        )
 
     # --------------------------------------------------------
     # 3. RSI MOMENTUM — 15 POINTS
     # --------------------------------------------------------
-    if 50 <= rsi <= 70:
-        buy_score += 15
-        buy_reasons.append(f"RSI confirms bullish momentum ({rsi:.1f})")
 
-    elif 30 <= rsi < 50:
-        sell_score += 15
-        sell_reasons.append(f"RSI confirms bearish momentum ({rsi:.1f})")
+    rsi_direction, rsi_points, rsi_reason = _rsi_score(rsi)
+
+    if rsi_direction == "BUY":
+        buy_score += rsi_points
+        buy_reasons.append(rsi_reason)
+
+    elif rsi_direction == "SELL":
+        sell_score += rsi_points
+        sell_reasons.append(rsi_reason)
 
     # --------------------------------------------------------
     # 4. MACD DIRECTION — 20 POINTS
     # --------------------------------------------------------
+
     if macd > macd_signal:
         buy_score += 20
-        buy_reasons.append("MACD confirms bullish momentum")
+        buy_reasons.append(
+            "MACD confirms bullish momentum"
+        )
 
     elif macd < macd_signal:
         sell_score += 20
-        sell_reasons.append("MACD confirms bearish momentum")
+        sell_reasons.append(
+            "MACD confirms bearish momentum"
+        )
 
     # --------------------------------------------------------
     # 5. FRESH MACD CROSSOVER — 10 POINTS
     # --------------------------------------------------------
+
     bullish_cross = (
         macd > macd_signal
         and previous_macd <= previous_macd_signal
@@ -155,28 +221,116 @@ def score_direction(
 
     if bullish_cross:
         buy_score += 10
-        buy_reasons.append("Fresh bullish MACD crossover")
+        buy_reasons.append(
+            "Fresh bullish MACD crossover"
+        )
 
     elif bearish_cross:
         sell_score += 10
-        sell_reasons.append("Fresh bearish MACD crossover")
+        sell_reasons.append(
+            "Fresh bearish MACD crossover"
+        )
 
     # --------------------------------------------------------
-    # 6. CONFIRMATION CANDLE — 20 POINTS
+    # 6. CANDLE CONFIRMATION — 20 POINTS
     # --------------------------------------------------------
-    if candle_close > candle_open:
-        buy_score += 20
-        buy_reasons.append("15M candle confirms bullish price action")
 
-    elif candle_close < candle_open:
-        sell_score += 20
-        sell_reasons.append("15M candle confirms bearish price action")
+    candle_direction, candle_points, candle_reason = _candle_score(
+        candle_open,
+        candle_close,
+        atr,
+    )
+
+    if candle_direction == "BUY":
+        buy_score += candle_points
+        buy_reasons.append(candle_reason)
+
+    elif candle_direction == "SELL":
+        sell_score += candle_points
+        sell_reasons.append(candle_reason)
+
+    # --------------------------------------------------------
+    # FINAL SCORES
+    # --------------------------------------------------------
+
+    buy_score = clamp_score(buy_score)
+    sell_score = clamp_score(sell_score)
+
+    # --------------------------------------------------------
+    # HIGH-SCORE QUALITY FILTER
+    # --------------------------------------------------------
+    #
+    # A score alone should not create a STRONG signal.
+    #
+    # 90+ requires:
+    #   - 15M EMA alignment
+    #   - 1H trend agreement
+    #
+    # 100+ additionally requires:
+    #   - RSI confirmation
+    #   - MACD confirmation
+    #
+    # 105+ additionally requires:
+    #   - fresh MACD crossover
+    #   - meaningful candle confirmation
+    # --------------------------------------------------------
+
+    def quality_filter(
+        direction: str,
+        score: int,
+        reasons: List[str],
+    ) -> tuple[int, List[str]]:
+        reason_text = " ".join(reasons)
+
+        has_15m_ema = (
+            "15M EMA bullish alignment" in reason_text
+            if direction == "BUY"
+            else "15M EMA bearish alignment" in reason_text
+        )
+
+        has_1h_trend = (
+            "1H higher-timeframe trend is bullish" in reason_text
+            if direction == "BUY"
+            else "1H higher-timeframe trend is bearish" in reason_text
+        )
+
+        has_rsi = "RSI " in reason_text
+        has_macd = "MACD confirms" in reason_text
+        has_cross = "Fresh " in reason_text and "MACD crossover" in reason_text
+        has_candle = "15M candle confirms" in reason_text
+
+        # 90+ must have both timeframe trends aligned.
+        if score >= STRONG_MIN:
+            if not (has_15m_ema and has_1h_trend):
+                score = min(score, STRONG_MIN - 1)
+
+        # 100+ must also have RSI and MACD confirmation.
+        if score >= VERY_STRONG_MIN:
+            if not (has_rsi and has_macd):
+                score = min(score, STRONG_MIN)
+
+        # 105+ must have fresh crossover and candle confirmation.
+        if score >= STRONGER_MIN:
+            if not (has_cross and has_candle):
+                score = min(score, VERY_STRONG_MIN - 1)
+
+        return clamp_score(score), reasons
+
+    buy_score, buy_reasons = quality_filter(
+        "BUY",
+        buy_score,
+        buy_reasons,
+    )
+
+    sell_score, sell_reasons = quality_filter(
+        "SELL",
+        sell_score,
+        sell_reasons,
+    )
 
     # --------------------------------------------------------
     # FINAL DIRECTION
     # --------------------------------------------------------
-    buy_score = clamp_score(buy_score)
-    sell_score = clamp_score(sell_score)
 
     if buy_score > sell_score:
         return "BUY", buy_score, buy_reasons, sell_reasons
@@ -200,14 +354,9 @@ def score_signal(
     previous_macd_signal: float,
     candle_open: float,
     candle_close: float,
+    atr: float | None = None,
     minimum_score: int = WEAK_MIN,
 ) -> Dict[str, Any]:
-    """
-    Main public scoring function.
-
-    Returns a consistent dictionary that the signal generator
-    can use without knowing how the scoring system works.
-    """
     direction, score, reasons, opposite_reasons = score_direction(
         ema9=ema9,
         ema21=ema21,
@@ -220,6 +369,7 @@ def score_signal(
         previous_macd_signal=previous_macd_signal,
         candle_open=candle_open,
         candle_close=candle_close,
+        atr=atr,
     )
 
     score = clamp_score(score)
@@ -252,18 +402,18 @@ def score_signal(
     }
 
 
-def is_vip_score(score: int, minimum_score: int = STRONG_MIN) -> bool:
-    """Return True when a signal qualifies for VIP delivery."""
+def is_vip_score(
+    score: int,
+    minimum_score: int = STRONG_MIN,
+) -> bool:
     return int(score) >= int(minimum_score)
 
 
 def is_elite_score(score: int) -> bool:
-    """Return True for the highest Apex signal tier."""
     return int(score) >= STRONGER_MIN
 
 
 def score_label(score: int) -> str:
-    """Return a safe display label for any score."""
     strength = get_strength(score)
 
     if strength:
