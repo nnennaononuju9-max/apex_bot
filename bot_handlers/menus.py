@@ -110,7 +110,7 @@ Your ✨ *VIP TRIAL* is live *right now* and expires in 24 hours.
 
 ‎🏛️ WELCOME TO APEX
 ‎
-‎Welcome, {name}!*. 👋
+‎Welcome, {name}! 👋
 ‎
 ‎You’ve entered APEX — a private trading environment built around precision, discipline, and risk management.
 ‎
