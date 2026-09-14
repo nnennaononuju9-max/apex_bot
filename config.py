@@ -41,6 +41,9 @@ TWELVE_DATA_API_KEY = os.getenv("TWELVE_DATA_API_KEY", "")
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 
+# Financial Modeling Prep — Economic Calendar (News button)
+FMP_API_KEY = os.getenv("FMP_API_KEY", "")
+
 # Number of candles requested
 CANDLE_LIMIT = int(os.getenv("CANDLE_LIMIT", "150"))
 
