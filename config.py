@@ -64,20 +64,88 @@ CUSTOMER_SERVICE_LINK = os.getenv("CUSTOMER_SERVICE_LINK", "https://t.me/ApexSup
 PORT = int(os.getenv("PORT", "8080"))
 
 # ============================================================
-# SIGNAL SETTINGS
+# SIGNAL SETTINGS — APEX V4
 # ============================================================
 
-# Minimum score for signals allowed in the free channel (out of 110)
-FREE_SIGNAL_SCORE = int(os.getenv("FREE_SIGNAL_SCORE", "70"))
+# Minimum score for FREE channel.
+# V4 intentionally makes free signals selective.
+FREE_SIGNAL_SCORE = int(
+    os.getenv("FREE_SIGNAL_SCORE", "95")
+)
 
-# Minimum score detected for VIP channel / priority scanner (out of 110)
-VIP_SCAN_SCORE = int(os.getenv("VIP_SCAN_SCORE", "90"))
+# Minimum score for VIP scanner/channel.
+VIP_SCAN_SCORE = int(
+    os.getenv("VIP_SCAN_SCORE", "90")
+)
 
-# Automatic market scan interval in minutes (scans all forex + crypto)
-SIGNAL_INTERVAL_MINUTES = int(os.getenv("SIGNAL_INTERVAL_MINUTES", "30"))
+# Scanner interval.
+SIGNAL_INTERVAL_MINUTES = int(
+    os.getenv("SIGNAL_INTERVAL_MINUTES", "30")
+)
 
-# Maximum number of automatically posted signals per market per day
-MAX_SIGNALS_PER_MARKET_PER_DAY = int(os.getenv("MAX_SIGNALS_PER_MARKET_PER_DAY", "4"))
+# Maximum automatically posted signals per market/day.
+MAX_SIGNALS_PER_MARKET_PER_DAY = int(
+    os.getenv(
+        "MAX_SIGNALS_PER_MARKET_PER_DAY",
+        "2",
+    )
+)
+
+# ============================================================
+# APEX V4 RISK SETTINGS
+# ============================================================
+
+# Minimum TP3 reward/risk.
+MIN_TP3_RR = float(
+    os.getenv("MIN_TP3_RR", "2.0")
+)
+
+# Structural SL buffer.
+SL_ATR_BUFFER = float(
+    os.getenv("SL_ATR_BUFFER", "0.15")
+)
+
+# Prevent absurdly wide structural stops.
+MAX_RISK_ATR = float(
+    os.getenv("MAX_RISK_ATR", "3.0")
+)
+
+# R multiples for targets.
+TP1_RR = float(
+    os.getenv("TP1_RR", "1.0")
+)
+
+TP2_RR = float(
+    os.getenv("TP2_RR", "2.0")
+)
+
+TP3_RR = float(
+    os.getenv("TP3_RR", "3.0")
+)
+
+# Crypto requires slightly stronger displacement.
+CRYPTO_MIN_DISPLACEMENT_ATR = float(
+    os.getenv(
+        "CRYPTO_MIN_DISPLACEMENT_ATR",
+        "0.60",
+    )
+)
+
+FOREX_MIN_DISPLACEMENT_ATR = float(
+    os.getenv(
+        "FOREX_MIN_DISPLACEMENT_ATR",
+        "0.50",
+    )
+)
+
+# Optional volume requirement for crypto.
+CRYPTO_VOLUME_CONFIRMATION = (
+    os.getenv(
+        "CRYPTO_VOLUME_CONFIRMATION",
+        "true",
+    ).lower()
+    == "true"
+)
 
 # ============================================================
 # SIGNAL CONTROL
