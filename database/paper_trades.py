@@ -198,5 +198,4 @@ def get_paper_trade_stats() -> dict[str, Any]:
                 "losses": row["losses"] or 0,
                 "win_rate": win_rate,
                 "total_r": round(float(row["total_r"] or 0), 2),
-    }
-    
+            }
