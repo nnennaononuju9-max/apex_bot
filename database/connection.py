@@ -176,7 +176,7 @@ def init_db():
                 getattr(config, "CRYPTO_PAYMENTS_ENABLED", True),
             ))
 
-            # Backfill NULL bank/opay details on existing row (production fix)
+            # Backfill NULL bank/opay details on existing row
             cur.execute("""
                 UPDATE payment_settings
                 SET
@@ -279,52 +279,6 @@ def init_db():
                 ADD COLUMN IF NOT EXISTS tp2_hit BOOLEAN DEFAULT FALSE;
             """)
 
-            cur.execute("""
-                ALTER TABLE paper_trades
-                ADD COLUMN IF NOT EXISTS breakeven_alerted BOOLEAN DEFAULT FALSE;
-            """)
-
-            # Bot Settings
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS bot_settings (
-                    key TEXT PRIMARY KEY,
-                    value TEXT,
-                    updated_at TIMESTAMPTZ DEFAULT NOW()
-                );
-            """)
-
-# Add new columns to existing databases
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp1 NUMERIC(30, 12);
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp2 NUMERIC(30, 12);
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp3 NUMERIC(30, 12);
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp1_hit BOOLEAN DEFAULT FALSE;
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS tp2_hit BOOLEAN DEFAULT FALSE;
-""")
-
-cur.execute("""
-    ALTER TABLE paper_trades
-    ADD COLUMN IF NOT EXISTS breakeven_alerted BOOLEAN DEFAULT FALSE;
-""")
-
-            # Fix: add real flag so breakeven alert is only sent once
             cur.execute("""
                 ALTER TABLE paper_trades
                 ADD COLUMN IF NOT EXISTS breakeven_alerted BOOLEAN DEFAULT FALSE;
