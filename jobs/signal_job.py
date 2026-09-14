@@ -1,486 +1,774 @@
 """
-Automatic market scan job — posts free & VIP signals on a schedule.
-Paper trading only records VIP-quality (90+) signals.
+Apex Bot signal generation engine.
+
+Builds qualified trading signals from:
+- 15M market data
+- 1H trend confirmation
+- Technical indicators
+- Scoring engine
+- Structural price-action data
+- Risk/reward validation
+- Daily market signal limits
 """
 
 from __future__ import annotations
 
-import asyncio
-import logging
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Optional
+import uuid
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.constants import ParseMode
-from telegram.ext import ContextTypes
+import pandas as pd
 
-import config
+from config import (
+    FREE_SIGNAL_SCORE,
+    VIP_SCAN_SCORE,
+    MAX_SIGNALS_PER_MARKET_PER_DAY,
+)
+
 from database import (
-    are_signals_paused,
-    get_free_channel,
-    get_vip_channel,
-    open_paper_trade,
-)
-from engine import (
-    MARKETS,
-    generate_free_signal,
-    generate_vip_signal,
-    mark_signal_posted,
-)
-from bot_handlers.signals import (
-    build_signal_message,
-    get_score,
-    get_signal_key,
+    get_daily_signal_count,
+    increment_daily_signal_count,
 )
 
-logger = logging.getLogger(__name__)
+from .market_data import get_data, CRYPTO_SYMBOL_MAP
+from .indicators import calculate_indicators
+from .scoring import score_signal, MAX_SCORE
+from .risk import build_risk_profile
 
 
 # ============================================================
-# CONFIGURATION
+# HELPERS
 # ============================================================
 
-VIP_SIGNAL_MIN_SCORE = getattr(config, "VIP_SCAN_SCORE", 90)
+def price_format(price: float) -> str:
+    try:
+        p = float(price)
+    except (TypeError, ValueError):
+        return str(price)
 
-# Prevent the same signal from being delivered repeatedly
-_delivered_signal_keys: set[str] = set()
+    if p >= 1000:
+        return f"{p:,.2f}"
 
-# VIP signals waiting for an admin to release them to free
-_pending_elite_signals: dict[str, dict[str, Any]] = {}
+    if p >= 1:
+        return f"{p:.4f}"
+
+    return f"{p:.6f}"
 
 
-# ============================================================
-# AUTOMATIC SIGNAL SCANNER
-# ============================================================
+def create_signal_code() -> str:
+    return uuid.uuid4().hex[:8].upper()
 
-async def automatic_signal_job(
-    context: ContextTypes.DEFAULT_TYPE,
-) -> None:
+
+def build_chart_url(symbol: str) -> str:
+    clean = symbol.replace("/", "").upper()
+    return f"https://www.tradingview.com/chart/?symbol={clean}"
+
+
+def normalize_symbol(symbol: str) -> str:
     """
-    Scan all configured markets.
-
-    Free signals:
-        Generated using the FREE_SIGNAL_SCORE threshold.
-
-    VIP signals:
-        Generated using the VIP_SCAN_SCORE threshold.
-
-    Paper trading:
-        ONLY records VIP-quality signals (90+).
+    Normalize common symbols into BASE/QUOTE format.
     """
 
-    if are_signals_paused():
-        return
+    symbol = str(symbol).strip().upper()
 
-    free_channel = get_free_channel()
-    vip_channel = get_vip_channel()
+    if "/" not in symbol and len(symbol) == 6:
+        symbol = f"{symbol[:3]}/{symbol[3:]}"
 
-    if not free_channel and not vip_channel:
-        logger.warning("No free or VIP channel configured.")
-        return
-
-    for symbol in MARKETS:
-        try:
-
-            # ==================================================
-            # 1. Generate the normal/free signal
-            # ==================================================
-
-            free_signal = await asyncio.to_thread(
-                generate_free_signal,
-                symbol,
-            )
-
-            if not free_signal:
-                await asyncio.sleep(1.0)
-                continue
-
-            score = get_score(free_signal)
-
-            # ==================================================
-            # 2. If the free signal is already VIP quality,
-            #    use it as the VIP signal.
-            #
-            #    This avoids generating the same market setup
-            #    twice unnecessarily.
-            # ==================================================
-
-            if score >= VIP_SIGNAL_MIN_SCORE:
-
-                signal = free_signal
-
-                signal_key = get_signal_key(signal)
-
-                if signal_key in _delivered_signal_keys:
-                    await asyncio.sleep(1.0)
-                    continue
-
-                # ----------------------------------------------
-                # Send VIP signal
-                # ----------------------------------------------
-
-                if vip_channel:
-                    await context.bot.send_message(
-                        chat_id=vip_channel,
-                        text=build_signal_message(
-                            signal,
-                            vip=True,
-                        ),
-                        parse_mode=ParseMode.MARKDOWN,
-                        disable_web_page_preview=True,
-                    )
-
-                # ----------------------------------------------
-                # Save pending VIP signal for admin release
-                # ----------------------------------------------
-
-                _pending_elite_signals[signal_key] = signal
-
-                buttons = InlineKeyboardMarkup(
-                    [[
-                        InlineKeyboardButton(
-                            "📢 Release to Free Channel",
-                            callback_data=f"release_free_{signal_key}",
-                        )
-                    ]]
-                )
-
-                # ----------------------------------------------
-                # Notify admins
-                # ----------------------------------------------
-
-                for admin_id in getattr(
-                    config,
-                    "ADMIN_IDS",
-                    set(),
-                ):
-                    try:
-                        await context.bot.send_message(
-                            chat_id=admin_id,
-                            text=(
-                                f"👑 *VIP Signal posted for {symbol}*\n\n"
-                                "Tap below to release this signal "
-                                "to the free channel.\n\n"
-                                + build_signal_message(
-                                    signal,
-                                    vip=True,
-                                )
-                            ),
-                            parse_mode=ParseMode.MARKDOWN,
-                            reply_markup=buttons,
-                            disable_web_page_preview=True,
-                        )
-
-                    except Exception as err:
-                        logger.error(
-                            "Admin alert error for %s: %s",
-                            symbol,
-                            err,
-                        )
-
-                # ----------------------------------------------
-                # Mark as delivered
-                # ----------------------------------------------
-
-                _delivered_signal_keys.add(signal_key)
-
-                mark_signal_posted(symbol)
-
-                # ----------------------------------------------
-                # IMPORTANT:
-                # Only VIP 90+ signals enter paper trading.
-                # ----------------------------------------------
-
-                _record_paper_trade(
-                    signal,
-                    signal_key,
-                    symbol,
-                    score,
-                )
-
-                await asyncio.sleep(1.0)
-                continue
-
-            # ==================================================
-            # 3. Normal FREE signal
-            # ==================================================
-
-            signal = free_signal
-            signal_key = get_signal_key(signal)
-
-            if signal_key in _delivered_signal_keys:
-                await asyncio.sleep(1.0)
-                continue
-
-            if free_channel:
-                await context.bot.send_message(
-                    chat_id=free_channel,
-                    text=build_signal_message(
-                        signal,
-                        vip=False,
-                    ),
-                    parse_mode=ParseMode.MARKDOWN,
-                    disable_web_page_preview=True,
-                )
-
-                _delivered_signal_keys.add(signal_key)
-
-                mark_signal_posted(symbol)
-
-                # IMPORTANT:
-                # Do NOT record 65-89 free signals
-                # as paper trades.
-
-            await asyncio.sleep(1.0)
-
-        except Exception as err:
-            logger.exception(
-                "Signal error on %s: %s",
-                symbol,
-                err,
-            )
-
-            await asyncio.sleep(1.0)
+    return symbol
 
 
 # ============================================================
-# PAPER TRADE RECORDING
+# SIGNAL CREATION
 # ============================================================
 
-def _record_paper_trade(
-    signal: dict,
-    signal_key: str,
+def create_signal(
     symbol: str,
-    score: int,
-) -> None:
-    if not getattr(config, "PAPER_TRADING_ENABLED", True):
-        return
+    *,
+    minimum_score: int = FREE_SIGNAL_SCORE,
+    interval: str = "15min",
+) -> Optional[dict[str, Any]]:
+    """
+    Build a qualified trading signal.
+
+    Pipeline:
+
+        15M data
+            ↓
+        indicators
+            ↓
+        1H trend
+            ↓
+        scoring engine
+            ↓
+        structural price action
+            ↓
+        risk profile
+            ↓
+        RR validation
+            ↓
+        final signal
+    """
+
+    symbol = normalize_symbol(symbol)
+
+    # --------------------------------------------------------
+    # 1. Validate minimum score
+    # --------------------------------------------------------
 
     try:
-        entry_p = float(
-            signal.get("entry_price")
-            or signal.get("price")
-            or signal.get("current_price")
-            or 0.0
-        )
+        minimum_score = int(minimum_score)
+    except (TypeError, ValueError):
+        minimum_score = int(FREE_SIGNAL_SCORE)
 
-        sl_p = float(signal.get("stop_loss") or 0.0)
+    minimum_score = max(0, minimum_score)
 
-        tp1_p = float(
-            signal.get("tp1")
-            or signal.get("take_profit")
-            or 0.0
-        )
+    # --------------------------------------------------------
+    # 2. Load 15M market data
+    # --------------------------------------------------------
 
-        tp2_p = float(signal.get("tp2") or 0.0)
-        tp3_p = float(signal.get("tp3") or 0.0)
-
-        # We need at least Entry, SL and TP1
-        if entry_p <= 0 or sl_p <= 0 or tp1_p <= 0:
-            logger.warning(
-                "Paper trade skipped for %s: invalid Entry/SL/TP1",
-                symbol,
-            )
-            return
-
-        # Keep take_profit populated for compatibility.
-        # TP2 is the final target when available;
-        # otherwise fall back to TP1.
-        final_tp = tp2_p if tp2_p > 0 else tp1_p
-
-        open_paper_trade(
-            signal_code=signal_key,
-            symbol=symbol,
-            direction=str(
-                signal.get("direction", "BUY")
-            ).upper(),
-            signal_score=score,
-            entry_price=entry_p,
-            stop_loss=sl_p,
-            tp1=tp1_p,
-            tp2=tp2_p if tp2_p > 0 else None,
-            tp3=tp3_p if tp3_p > 0 else None,
-            take_profit=final_tp,
-        )
-
-    except Exception as p_err:
-        logger.exception(
-            "Paper trade record error for %s: %s",
+    try:
+        df = get_data(
             symbol,
+            interval=interval,
         )
+    except Exception:
+        return None
+
+    if df is None or df.empty:
+        return None
 
     # --------------------------------------------------------
-    # Safety check: never paper trade weak/free signals
+    # 3. Calculate 15M indicators
     # --------------------------------------------------------
-
-    if score < VIP_SIGNAL_MIN_SCORE:
-        return
-
-    # --------------------------------------------------------
-    # Global paper trading switch
-    # --------------------------------------------------------
-
-    if not getattr(
-        config,
-        "PAPER_TRADING_ENABLED",
-        True,
-    ):
-        return
 
     try:
+        df = calculate_indicators(df)
+    except Exception:
+        return None
 
-        # ----------------------------------------------------
-        # Entry
-        # ----------------------------------------------------
+    if len(df) < 2:
+        return None
 
-        entry_p = float(
-            signal.get("entry_price")
-            or signal.get("price")
-            or signal.get("current_price")
-            or 0.0
+    # --------------------------------------------------------
+    # 4. Extract latest 15M values
+    # --------------------------------------------------------
+
+    try:
+        row = df.iloc[-1]
+        previous_row = df.iloc[-2]
+
+        close = float(row["close"])
+        candle_open = float(row["open"])
+
+        ema9 = float(row["ema9"])
+        ema21 = float(row["ema21"])
+        rsi = float(row["rsi"])
+
+        macd = float(row["macd"])
+        macd_signal = float(row["macd_signal"])
+
+        previous_macd = float(previous_row["macd"])
+        previous_macd_signal = float(
+            previous_row["macd_signal"]
         )
 
-        # ----------------------------------------------------
-        # Stop Loss
-        # ----------------------------------------------------
+        atr = float(row["atr"])
 
-        sl_p = float(
-            signal.get("stop_loss")
-            or 0.0
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    # --------------------------------------------------------
+    # 5. Validate indicator values
+    # --------------------------------------------------------
+
+    numeric_values = (
+        close,
+        candle_open,
+        ema9,
+        ema21,
+        rsi,
+        macd,
+        macd_signal,
+        previous_macd,
+        previous_macd_signal,
+        atr,
+    )
+
+    if any(pd.isna(value) for value in numeric_values):
+        return None
+
+    if close <= 0 or atr <= 0:
+        return None
+
+    # --------------------------------------------------------
+    # 6. Load 1H data
+    # --------------------------------------------------------
+
+    try:
+        higher_df = get_data(
+            symbol,
+            interval="1h",
         )
 
-        # ----------------------------------------------------
-        # Take Profit
-        #
-        # Paper trading uses TP2 as the main target.
-        # ----------------------------------------------------
+        if higher_df is None or higher_df.empty:
+            return None
 
-        tp_p = float(
-            signal.get("tp2")
-            or signal.get("take_profit")
-            or signal.get("take_profit_1")
-            or 0.0
+        higher_df = calculate_indicators(higher_df)
+
+        if higher_df.empty:
+            return None
+
+        higher_row = higher_df.iloc[-1]
+
+        higher_ema9 = float(
+            higher_row["ema9"]
         )
 
-        # ----------------------------------------------------
-        # Validate levels
-        # ----------------------------------------------------
+        higher_ema21 = float(
+            higher_row["ema21"]
+        )
 
-        if entry_p <= 0:
-            logger.warning(
-                "Invalid entry price for %s: %s",
-                symbol,
-                entry_p,
+    except Exception:
+        return None
+
+    if (
+        pd.isna(higher_ema9)
+        or pd.isna(higher_ema21)
+    ):
+        return None
+
+    # --------------------------------------------------------
+    # 7. Run scoring engine
+    # --------------------------------------------------------
+
+    try:
+        scoring = score_signal(
+            ema9=ema9,
+            ema21=ema21,
+            higher_ema9=higher_ema9,
+            higher_ema21=higher_ema21,
+            rsi=rsi,
+            macd=macd,
+            macd_signal=macd_signal,
+            previous_macd=previous_macd,
+            previous_macd_signal=previous_macd_signal,
+            candle_open=candle_open,
+            candle_close=close,
+            atr=atr,
+            minimum_score=minimum_score,
+        )
+
+    except Exception:
+        return None
+
+    if not scoring:
+        return None
+
+    if not scoring.get("valid"):
+        return None
+
+    direction = scoring.get("direction")
+
+    if direction not in {"BUY", "SELL"}:
+        return None
+
+    try:
+        score = int(
+            scoring.get("score") or 0
+        )
+    except (TypeError, ValueError):
+        return None
+
+    if score < minimum_score:
+        return None
+
+    # --------------------------------------------------------
+    # 8. Extract scoring information
+    # --------------------------------------------------------
+
+    reasons = list(
+        scoring.get("reasons") or []
+    )
+
+    opposite_reasons = list(
+        scoring.get("opposite_reasons") or []
+    )
+
+    # The current scoring.py returns no structural PA object.
+    # Keep this optional so the generator remains compatible
+    # with an upgraded scoring engine that adds it later.
+    price_action = (
+        scoring.get("price_action")
+        or {}
+    )
+
+    indicator_confirmation = (
+        scoring.get("indicator_confirmation")
+        or {}
+    )
+
+    # --------------------------------------------------------
+    # 9. Determine crypto market
+    # --------------------------------------------------------
+
+    is_crypto = (
+        symbol in CRYPTO_SYMBOL_MAP
+    )
+
+    # --------------------------------------------------------
+    # 10. Strong signal quality gate
+    # --------------------------------------------------------
+    #
+    # 90+ requires genuine timeframe alignment.
+    # The scoring engine itself enforces this.
+    #
+    # We do NOT duplicate scoring conditions here.
+    # This prevents signal_generator.py from fighting
+    # scoring.py.
+
+    if score < 90:
+        return None
+
+    # --------------------------------------------------------
+    # 11. Optional confirmation checks
+    # --------------------------------------------------------
+
+    rsi_ok = indicator_confirmation.get(
+        "rsi_ok"
+    )
+
+    macd_ok = indicator_confirmation.get(
+        "macd_ok"
+    )
+
+    # Only enforce these if the scoring engine supplies
+    # explicit confirmation flags.
+    #
+    # This keeps compatibility with the scoring.py you
+    # currently sent, which does not return these fields.
+    if indicator_confirmation:
+        if rsi_ok is False:
+            return None
+
+        if macd_ok is False:
+            return None
+
+    # --------------------------------------------------------
+    # 12. Build risk profile
+    # --------------------------------------------------------
+
+    try:
+        risk = build_risk_profile(
+            entry_price=close,
+            atr=atr,
+            direction=direction,
+        )
+
+    except Exception:
+        return None
+
+    if not risk:
+        return None
+
+    # --------------------------------------------------------
+    # 13. Extract trade levels
+    # --------------------------------------------------------
+
+    try:
+        entry_price = float(
+            risk["entry_price"]
+        )
+
+        stop_loss = float(
+            risk["stop_loss"]
+        )
+
+        tp1 = float(
+            risk["tp1"]
+        )
+
+        tp2 = float(
+            risk["tp2"]
+        )
+
+        tp3 = float(
+            risk["tp3"]
+        )
+
+    except (KeyError, TypeError, ValueError):
+        return None
+
+    # --------------------------------------------------------
+    # 14. Validate trade geometry
+    # --------------------------------------------------------
+
+    if (
+        entry_price <= 0
+        or stop_loss <= 0
+        or tp1 <= 0
+        or tp2 <= 0
+        or tp3 <= 0
+    ):
+        return None
+
+    if direction == "BUY":
+
+        if not (
+            stop_loss
+            < entry_price
+            < tp1
+            <= tp2
+            <= tp3
+        ):
+            return None
+
+    elif direction == "SELL":
+
+        if not (
+            tp3
+            <= tp2
+            <= tp1
+            < entry_price
+            < stop_loss
+        ):
+            return None
+
+    else:
+        return None
+
+    # --------------------------------------------------------
+    # 15. Risk/reward validation
+    # --------------------------------------------------------
+
+    risk_distance = abs(
+        entry_price - stop_loss
+    )
+
+    if risk_distance <= 0:
+        return None
+
+    rr_tp1 = abs(
+        tp1 - entry_price
+    ) / risk_distance
+
+    rr_tp2 = abs(
+        tp2 - entry_price
+    ) / risk_distance
+
+    rr_tp3 = abs(
+        tp3 - entry_price
+    ) / risk_distance
+
+    # Hard TP3 R:R gate.
+    if rr_tp3 < 2.0:
+        return None
+
+    # --------------------------------------------------------
+    # 16. Optional structural invalidation
+    # --------------------------------------------------------
+
+    invalidation_price = price_action.get(
+        "invalidation_price"
+    )
+
+    if invalidation_price is not None:
+
+        try:
+            invalidation_price = float(
+                invalidation_price
             )
-            return
+        except (TypeError, ValueError):
+            invalidation_price = None
 
-        if sl_p <= 0:
-            logger.warning(
-                "Invalid stop loss for %s: %s",
-                symbol,
-                sl_p,
-            )
-            return
-
-        if tp_p <= 0:
-            logger.warning(
-                "Invalid take profit for %s: %s",
-                symbol,
-                tp_p,
-            )
-            return
-
-        direction = str(
-            signal.get("direction", "BUY")
-        ).upper()
-
-        # ----------------------------------------------------
-        # Validate direction/price relationship
-        # ----------------------------------------------------
+    if invalidation_price is not None:
 
         if direction == "BUY":
-
-            if sl_p >= entry_p:
-                logger.warning(
-                    "Invalid BUY SL for %s: SL=%s Entry=%s",
-                    symbol,
-                    sl_p,
-                    entry_p,
-                )
-                return
-
-            if tp_p <= entry_p:
-                logger.warning(
-                    "Invalid BUY TP for %s: TP=%s Entry=%s",
-                    symbol,
-                    tp_p,
-                    entry_p,
-                )
-                return
+            if invalidation_price >= entry_price:
+                return None
 
         elif direction == "SELL":
+            if invalidation_price <= entry_price:
+                return None
 
-            if sl_p <= entry_p:
-                logger.warning(
-                    "Invalid SELL SL for %s: SL=%s Entry=%s",
-                    symbol,
-                    sl_p,
-                    entry_p,
-                )
-                return
+    # --------------------------------------------------------
+    # 17. Signal strength
+    # --------------------------------------------------------
 
-            if tp_p >= entry_p:
-                logger.warning(
-                    "Invalid SELL TP for %s: TP=%s Entry=%s",
-                    symbol,
-                    tp_p,
-                    entry_p,
-                )
-                return
+    if score >= 105:
+        signal_tier = "💎 STRONGER"
 
-        else:
-            logger.warning(
-                "Invalid direction for %s: %s",
-                symbol,
-                direction,
+    elif score >= 100:
+        signal_tier = "🔥 VERY STRONG"
+
+    elif score >= 90:
+        signal_tier = "🔥 STRONG"
+
+    else:
+        signal_tier = None
+
+    if not signal_tier:
+        return None
+
+    # --------------------------------------------------------
+    # 18. Quality flags
+    # --------------------------------------------------------
+
+    quality_flags = {
+        "htf_aligned": (
+            (
+                direction == "BUY"
+                and higher_ema9 > higher_ema21
             )
-            return
-
-        # ----------------------------------------------------
-        # Open paper trade
-        # ----------------------------------------------------
-
-        trade_id = open_paper_trade(
-            signal_code=signal_key,
-            symbol=symbol,
-            direction=direction,
-            signal_score=score,
-            entry_price=entry_p,
-            stop_loss=sl_p,
-            take_profit=tp_p,
-        )
-
-        if trade_id:
-            logger.info(
-                "Paper trade opened: %s %s score=%s entry=%s SL=%s TP=%s",
-                symbol,
-                direction,
-                score,
-                entry_p,
-                sl_p,
-                tp_p,
+            or
+            (
+                direction == "SELL"
+                and higher_ema9 < higher_ema21
             )
+        ),
 
-    except Exception as err:
-        logger.exception(
-            "Paper trade record error for %s: %s",
-            symbol,
-            err,
-        )
+        "rsi_confirmation": (
+            bool(rsi_ok)
+            if rsi_ok is not None
+            else None
+        ),
+
+        "macd_confirmation": (
+            bool(macd_ok)
+            if macd_ok is not None
+            else None
+        ),
+
+        "price_action_available": bool(
+            price_action
+        ),
+    }
+
+    # --------------------------------------------------------
+    # 19. Final signal
+    # --------------------------------------------------------
+
+    signal = {
+        # Identity
+        "symbol": symbol,
+        "direction": direction,
+        "signal_code": create_signal_code(),
+        "generated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+
+        # Scoring
+        "score": score,
+        "max_score": MAX_SCORE,
+        "strength": signal_tier,
+        "minimum_score": minimum_score,
+
+        # Explanation
+        "reasons": reasons,
+        "opposite_reasons": opposite_reasons,
+        "quality_flags": quality_flags,
+
+        # Price action
+        "price_action": price_action,
+        "liquidity_level": price_action.get(
+            "liquidity_level"
+        ),
+        "structure_level": price_action.get(
+            "structure_level"
+        ),
+        "invalidation_price": invalidation_price,
+
+        "entry_zone_low": price_action.get(
+            "entry_zone_low"
+        ),
+        "entry_zone_high": price_action.get(
+            "entry_zone_high"
+        ),
+
+        "displacement_body_atr": (
+            price_action.get(
+                "displacement_body_atr"
+            )
+        ),
+
+        # Trade levels
+        "entry_price": entry_price,
+        "stop_loss": stop_loss,
+        "tp1": tp1,
+        "tp2": tp2,
+        "tp3": tp3,
+
+        # Compatibility
+        "take_profit": tp3,
+
+        # Risk/reward
+        "rr_tp1": round(rr_tp1, 2),
+        "rr_tp2": round(rr_tp2, 2),
+        "rr_tp3": round(rr_tp3, 2),
+
+        # Indicators
+        "atr": atr,
+        "rsi": rsi,
+        "ema9": ema9,
+        "ema21": ema21,
+        "higher_ema9": higher_ema9,
+        "higher_ema21": higher_ema21,
+        "macd": macd,
+        "macd_signal": macd_signal,
+
+        # Market
+        "is_crypto": is_crypto,
+        "interval": interval,
+
+        # Chart
+        "chart_url": build_chart_url(
+            symbol
+        ),
+    }
+
+    return signal
 
 
 # ============================================================
-# PENDING VIP SIGNALS
+# DAILY MARKET LIMIT
 # ============================================================
 
-def get_pending_elite_signals() -> dict[str, dict[str, Any]]:
-    return _pending_elite_signals
+def market_can_receive_signal(
+    symbol: str,
+) -> bool:
+    """
+    Respect the configured per-market daily signal limit.
+    """
+
+    try:
+        count = get_daily_signal_count(
+            symbol
+        )
+
+        return (
+            int(count)
+            < int(
+                MAX_SIGNALS_PER_MARKET_PER_DAY
+            )
+        )
+
+    except Exception:
+        # Do not block the signal engine if the
+        # database temporarily fails.
+        return True
+
+
+# ============================================================
+# FREE SIGNAL
+# ============================================================
+
+def generate_free_signal(
+    symbol: str,
+    interval: str = "15min",
+) -> Optional[dict[str, Any]]:
+
+    if not market_can_receive_signal(
+        symbol
+    ):
+        return None
+
+    return create_signal(
+        symbol,
+        minimum_score=FREE_SIGNAL_SCORE,
+        interval=interval,
+    )
+
+
+# ============================================================
+# VIP SIGNAL
+# ============================================================
+
+def generate_vip_signal(
+    symbol: str,
+    interval: str = "15min",
+) -> Optional[dict[str, Any]]:
+
+    return create_signal(
+        symbol,
+        minimum_score=VIP_SCAN_SCORE,
+        interval=interval,
+    )
+
+
+# ============================================================
+# DAILY COUNTER
+# ============================================================
+
+def mark_signal_posted(
+    symbol: str,
+) -> None:
+    """
+    Increment the daily market signal counter
+    after successful delivery.
+    """
+
+    try:
+        increment_daily_signal_count(
+            symbol
+        )
+
+    except Exception:
+        pass
+
+
+# ============================================================
+# SIGNAL HELPERS
+# ============================================================
+
+def get_score(
+    signal: dict[str, Any],
+) -> int:
+
+    try:
+        return int(
+            signal.get("score") or 0
+        )
+
+    except (TypeError, ValueError):
+        return 0
+
+
+def get_signal_key(
+    signal: dict[str, Any],
+) -> str:
+
+    symbol = str(
+        signal.get("symbol") or ""
+    )
+
+    direction = str(
+        signal.get("direction") or ""
+    )
+
+    code = str(
+        signal.get("signal_code") or ""
+    )
+
+    return (
+        f"{symbol}:"
+        f"{direction}:"
+        f"{code}"
+    )
+
+
+# ============================================================
+# PUBLIC API
+# ============================================================
+
+__all__ = [
+    "price_format",
+    "create_signal_code",
+    "build_chart_url",
+    "normalize_symbol",
+    "create_signal",
+    "generate_free_signal",
+    "generate_vip_signal",
+    "market_can_receive_signal",
+    "mark_signal_posted",
+    "get_score",
+    "get_signal_key",
+]
