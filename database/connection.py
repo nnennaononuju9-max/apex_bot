@@ -220,38 +220,78 @@ def init_db():
                 );
             """)
 
-              # Paper trades
-cur.execute("""
-    CREATE TABLE IF NOT EXISTS paper_trades (
-        id BIGSERIAL PRIMARY KEY,
-        signal_code TEXT UNIQUE NOT NULL,
-        symbol TEXT NOT NULL,
-        direction TEXT NOT NULL,
-        signal_score INTEGER,
+            # Paper trades
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS paper_trades (
+                    id BIGSERIAL PRIMARY KEY,
+                    signal_code TEXT UNIQUE NOT NULL,
+                    symbol TEXT NOT NULL,
+                    direction TEXT NOT NULL,
+                    signal_score INTEGER,
 
-        entry_price NUMERIC(30, 12) NOT NULL,
-        stop_loss NUMERIC(30, 12) NOT NULL,
+                    entry_price NUMERIC(30, 12) NOT NULL,
+                    stop_loss NUMERIC(30, 12) NOT NULL,
 
-        tp1 NUMERIC(30, 12),
-        tp2 NUMERIC(30, 12),
-        tp3 NUMERIC(30, 12),
+                    tp1 NUMERIC(30, 12),
+                    tp2 NUMERIC(30, 12),
+                    tp3 NUMERIC(30, 12),
 
-        take_profit NUMERIC(30, 12) NOT NULL,
+                    take_profit NUMERIC(30, 12) NOT NULL,
 
-        exit_price NUMERIC(30, 12),
+                    exit_price NUMERIC(30, 12),
 
-        result TEXT NOT NULL DEFAULT 'open',
+                    result TEXT NOT NULL DEFAULT 'open',
 
-        tp1_hit BOOLEAN DEFAULT FALSE,
-        tp2_hit BOOLEAN DEFAULT FALSE,
-        breakeven_alerted BOOLEAN DEFAULT FALSE,
+                    tp1_hit BOOLEAN DEFAULT FALSE,
+                    tp2_hit BOOLEAN DEFAULT FALSE,
+                    breakeven_alerted BOOLEAN DEFAULT FALSE,
 
-        r_multiple NUMERIC(10, 4),
+                    r_multiple NUMERIC(10, 4),
 
-        opened_at TIMESTAMPTZ DEFAULT NOW(),
-        closed_at TIMESTAMPTZ
-    );
-""")
+                    opened_at TIMESTAMPTZ DEFAULT NOW(),
+                    closed_at TIMESTAMPTZ
+                );
+            """)
+
+            # Add new columns to existing databases
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp1 NUMERIC(30, 12);
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp2 NUMERIC(30, 12);
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp3 NUMERIC(30, 12);
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp1_hit BOOLEAN DEFAULT FALSE;
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS tp2_hit BOOLEAN DEFAULT FALSE;
+            """)
+
+            cur.execute("""
+                ALTER TABLE paper_trades
+                ADD COLUMN IF NOT EXISTS breakeven_alerted BOOLEAN DEFAULT FALSE;
+            """)
+
+            # Bot Settings
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS bot_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """)
 
 # Add new columns to existing databases
 cur.execute("""
