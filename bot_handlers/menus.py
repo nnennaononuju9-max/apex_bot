@@ -108,18 +108,53 @@ Your ✨ *VIP TRIAL* is live *right now* and expires in 24 hours.
     return f"""
 {greeting}
 
-Your institutional algorithmic signal engine for **Forex**, **Gold (XAU/USD)**, and **Crypto (Binance)**.
-
-📊 **Features:**
-• High-accuracy 15M + 1H trend confluences
-• Forex & Metals: XAU/USD, EUR/USD, GBP/USD, USD/JPY
-• Crypto: BTC, ETH, SOL, BNB, XRP, DOGE, ADA
-• Clear Entry, SL & TP1/TP2/TP3 targets
-• 90+ Score setups delivered first to VIP
-• Smart Lot Calculator & Sessions Radar
-• Auto Breakeven Alerts & Paper Trading Tracker
-
-Select an action below to get started:
+‎🏛️ WELCOME TO APEX
+‎
+‎Welcome, {name}!*. 👋
+‎
+‎You’ve entered APEX — a private trading environment built around precision, discipline, and risk management.
+‎
+‎━━━━━━━━━━━━━━━━━━
+‎
+‎💎 THE APEX EDGE
+‎
+‎🎯 Premium Setups
+‎Forex • Gold • Crypto — structured entries, targets & risk.
+‎
+‎📡 Market Intelligence
+‎Real-time analysis, market structure & key developments.
+‎
+‎🛡️ Risk-First Execution
+‎Protect capital. Manage risk. Trade with discipline.
+‎
+‎📊 Performance Tracking
+‎Review results, improve execution and stay accountable.
+‎
+‎🎓 Trader Development
+‎Build the knowledge and mindset to trade consistently.
+‎
+‎━━━━━━━━━━━━━━━━━━
+‎
+‎⚡ YOUR APEX JOURNEY STARTS HERE
+‎
+‎👇 Choose from the menu:
+‎
+‎📡 LIVE SIGNALS
+‎📊 MARKET ANALYSIS
+‎📈 PERFORMANCE
+‎🎓 ACADEMY
+‎💬 SUPPORT
+‎
+‎━━━━━━━━━━━━━━━━━━
+‎
+‎🧠 THE APEX PRINCIPLE
+‎
+‎Analyze → Execute → Manage Risk → Review → Improve
+‎
+‎💎 Welcome to Apex. Trade with purpose.
+‎
+‎⚠️ Financial markets involve substantial risk. Apex content is for educational and informational purposes only and is not financial advice or a guarantee of results. Trade responsibly.
+‎
 """.strip()
 
 
@@ -174,7 +209,17 @@ def market_sessions_text() -> str:
 
 
 def economic_news_text() -> str:
-    return """
+    """
+    Live high-impact economic calendar (Financial Modeling Prep).
+    Falls back to static text if the API is unavailable.
+    """
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    api_key = os.getenv("FMP_API_KEY", "") or getattr(config, "FMP_API_KEY", "")
+
+    # Fallback static message
+    fallback = """
 📰 *HIGH-IMPACT ECONOMIC NEWS & RISK RADAR*
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 Major Macro Events:
@@ -189,6 +234,67 @@ Major Macro Events:
 2. Move SL to Breakeven before news
 3. Spreads widen sharply during spikes
 """.strip()
+
+    if not api_key:
+        return fallback + "\n\n_Live calendar unavailable (no API key)._"
+
+    try:
+        import requests
+
+        today = datetime.now(timezone.utc).date()
+        end = today + timedelta(days=3)
+
+        url = "https://financialmodelingprep.com/api/v3/economic_calendar"
+        params = {
+            "from": today.isoformat(),
+            "to": end.isoformat(),
+            "apikey": api_key,
+        }
+
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        events = response.json()
+
+        if not isinstance(events, list) or not events:
+            return fallback + "\n\n_No high-impact events found in the next few days._"
+
+        # Keep only high-impact events
+        high_impact = [
+            e for e in events
+            if str(e.get("impact", "")).lower() in ("high", "3")
+            or str(e.get("impact", "")).upper() == "HIGH"
+        ]
+
+        if not high_impact:
+            # If impact field is missing, show top events anyway
+            high_impact = events[:8]
+
+        lines = [
+            "📰 *LIVE ECONOMIC CALENDAR*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"📅 *Today → Next 3 days* (UTC)\n",
+        ]
+
+        for event in high_impact[:10]:
+            date = str(event.get("date", ""))[:16].replace("T", " ")
+            country = event.get("country", "")
+            name = event.get("event", "Event")
+            impact = str(event.get("impact", "")).title()
+
+            lines.append(
+                f"🔴 *{country}* — {name}\n"
+                f"   🕒 `{date}` | Impact: *{impact or 'High'}*"
+            )
+
+        lines.append("\n🛡️ *Rules:*")
+        lines.append("1. Avoid new entries 15 mins before high-impact news")
+        lines.append("2. Move SL to Breakeven before the release")
+        lines.append("3. Spreads can widen sharply")
+
+        return "\n".join(lines)
+
+    except Exception:
+        return fallback + "\n\n_Live calendar temporarily unavailable._"
 
 
 def market_sentiment_text(sentiment_state: dict) -> str:
