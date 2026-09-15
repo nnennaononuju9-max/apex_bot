@@ -70,7 +70,7 @@ def build_signal_message(signal: dict[str, Any], vip: bool = False) -> str:
             f"🎯 TP1: `{tp1_str}`\n"
             f"🎯 TP2: `{tp2_str}`\n"
             f"🔒 *TP3 Runner & Live Exit Alerts:* "
-            f"[Unlock in VIP](https://t.me/ApexTradeSignalsBot)"
+            f"[Unlock in VIP](https://t.me/ApexMarketSignalsBot)"
         )
 
     risk_guide = (
