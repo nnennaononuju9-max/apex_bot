@@ -366,30 +366,32 @@ def create_signal(
         return None
 
     # --------------------------------------------------------
-    # 9. REQUIRE COMPLETE PRICE-ACTION SEQUENCE
+    # 9. PRICE-ACTION QUALITY GATE (balanced)
     # --------------------------------------------------------
-    #
     # Required:
-    #
-    #   sweep
-    #       ↓
-    #   reclaim
-    #       ↓
-    #   displacement
-    #       ↓
-    #   structure break
-    #       ↓
-    #   retest
-    #
-    # If the sequence is incomplete, do not publish.
+    #   - displacement
+    #   - structure break OR higher-timeframe trend
+    # Full 5-step sequence is optional (elite bonus only)
     # --------------------------------------------------------
 
-    if not price_action.get(
-        "sequence_complete",
-        False,
-    ):
+    has_displacement = bool(price_action.get("displacement"))
+    has_structure_break = bool(price_action.get("structure_break"))
+
+    reason_text = " ".join(str(r) for r in reasons)
+    has_htf_trend = (
+        "1H higher-timeframe trend is bullish" in reason_text
+        or "1H higher-timeframe trend is bearish" in reason_text
+    )
+
+    if not has_displacement:
         return None
 
+    if not (has_structure_break or has_htf_trend):
+        return None
+
+    # Elite = full strict 5-step sequence present
+    is_elite_setup = bool(price_action.get("sequence_complete"))
+    
     # --------------------------------------------------------
     # 10. DETERMINE CRYPTO
     # --------------------------------------------------------
@@ -532,6 +534,9 @@ def create_signal(
     if not strength:
         return None
 
+    if is_elite_setup:
+        strength = f"💎 ELITE {strength}"
+        
     # --------------------------------------------------------
     # 17. QUALITY FLAGS
     # --------------------------------------------------------
@@ -663,8 +668,10 @@ def create_signal(
         "minimum_score": (
             minimum_score
         ),
-
+        
         "strength": strength,
+        
+        "is_elite_setup": is_elite_setup,
 
         "reasons": reasons,
 
