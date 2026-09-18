@@ -65,6 +65,7 @@ from .paper_trades import (
     mark_breakeven_alerted,
     get_recent_paper_trades,
     get_paper_trade_stats,
+    delete_paper_trade_by_code,
 )
 
 __all__ = [
@@ -115,5 +116,6 @@ __all__ = [
     "mark_breakeven_alerted",
     "get_recent_paper_trades",
     "get_paper_trade_stats",
+    "delete_paper_trade_by_code", 
 ]
 
