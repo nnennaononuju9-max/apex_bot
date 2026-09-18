@@ -41,6 +41,7 @@ from bot_handlers.admin import (
     pausesignals_command,
     resumesignals_command,
     signalstatus_command,
+    deltrade_command,
 )
 from utils.logging import setup_logging
 
@@ -102,7 +103,8 @@ def main() -> None:
     application.add_handler(CommandHandler("pausesignals", pausesignals_command))
     application.add_handler(CommandHandler("resumesignals", resumesignals_command))
     application.add_handler(CommandHandler("signalstatus", signalstatus_command))
-
+    application.add_handler(CommandHandler("deltrade", deltrade_command))
+    
     # ---- Callbacks ----
     application.add_handler(CallbackQueryHandler(menu_callback_router))
 
