@@ -41,6 +41,12 @@ from bot_handlers.payments import (
 logger = logging.getLogger(__name__)
 
 
+def back_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_home")],
+    ])
+
+
 async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if not query or not query.data:
@@ -55,7 +61,7 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
         has_joined = await check_channel_membership(user_id, context)
         if has_joined:
             await query.answer("✅ Channel membership verified!", show_alert=True)
-            await query.message.edit_text(
+            await query.edit_message_text(
                 welcome_text(query.from_user),
                 reply_markup=main_menu_keyboard(user_id),
                 parse_mode=ParseMode.MARKDOWN,
@@ -64,46 +70,102 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.answer("❌ You have not joined the channel yet.", show_alert=True)
         return
 
-    # ---- Main menu ----
-    if data == "menu_calc":
-        await query.message.reply_text(
-            lot_size_calculator_text(100.0, 25.0),
+    # ---- Back to main menu ----
+    if data == "menu_home":
+        await query.edit_message_text(
+            welcome_text(query.from_user),
+            reply_markup=main_menu_keyboard(user_id),
             parse_mode=ParseMode.MARKDOWN,
         )
+        return
+
+    # ---- Main menu screens (edit in place + Back button) ----
+    if data == "menu_calc":
+        await query.edit_message_text(
+            lot_size_calculator_text(100.0, 25.0),
+            reply_markup=back_keyboard(),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     elif data.startswith("calc_quick_"):
         val = float(data.replace("calc_quick_", ""))
-        await query.message.reply_text(
+        await query.edit_message_text(
             lot_size_calculator_text(val, 25.0),
+            reply_markup=back_keyboard(),
             parse_mode=ParseMode.MARKDOWN,
         )
+
     elif data == "menu_sessions":
-        await query.message.reply_text(market_sessions_text(), parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(
+            market_sessions_text(),
+            reply_markup=back_keyboard(),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     elif data == "menu_news":
-        await query.message.reply_text(economic_news_text(), parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(
+            economic_news_text(),
+            reply_markup=back_keyboard(),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     elif data == "menu_sentiment":
         buttons = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton("🐂 Vote Bullish", callback_data="vote_bull"),
                 InlineKeyboardButton("🐻 Vote Bearish", callback_data="vote_bear"),
-            ]
+            ],
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_home")],
         ])
-        await query.message.reply_text(
+        await query.edit_message_text(
             market_sentiment_text(_community_sentiment),
             reply_markup=buttons,
             parse_mode=ParseMode.MARKDOWN,
         )
+
     elif data == "vote_bull":
         _community_sentiment["bull"] = min(95, _community_sentiment["bull"] + 1)
         _community_sentiment["bear"] = max(5, 100 - _community_sentiment["bull"])
         _community_sentiment["total"] += 1
         await query.answer("🐂 Bullish vote recorded!", show_alert=True)
+        buttons = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🐂 Vote Bullish", callback_data="vote_bull"),
+                InlineKeyboardButton("🐻 Vote Bearish", callback_data="vote_bear"),
+            ],
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_home")],
+        ])
+        await query.edit_message_text(
+            market_sentiment_text(_community_sentiment),
+            reply_markup=buttons,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     elif data == "vote_bear":
         _community_sentiment["bear"] = min(95, _community_sentiment["bear"] + 1)
         _community_sentiment["bull"] = max(5, 100 - _community_sentiment["bear"])
         _community_sentiment["total"] += 1
         await query.answer("🐻 Bearish vote recorded!", show_alert=True)
+        buttons = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🐂 Vote Bullish", callback_data="vote_bull"),
+                InlineKeyboardButton("🐻 Vote Bearish", callback_data="vote_bear"),
+            ],
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu_home")],
+        ])
+        await query.edit_message_text(
+            market_sentiment_text(_community_sentiment),
+            reply_markup=buttons,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     elif data == "menu_report":
-        await query.message.reply_text(monthly_pl_report_text(), parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(
+            monthly_pl_report_text(),
+            reply_markup=back_keyboard(),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     elif data == "menu_trades":
         stats = get_paper_trade_stats()
         open_trades = get_open_paper_trades()
@@ -117,7 +179,12 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
             lines.append("\n🟢 *OPEN:*")
             for ot in open_trades[:5]:
                 lines.append(f"• {ot['symbol']} {ot['direction']}")
-        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+        await query.edit_message_text(
+            "\n".join(lines),
+            reply_markup=back_keyboard(),
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
     elif data == "menu_signal":
         free_channel = get_free_channel()
         vip_channel = get_vip_channel()
@@ -129,26 +196,37 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
         lines.append(
             "\nMarkets: BTC, ETH, SOL, BNB, XRP, DOGE, ADA, XAU, EUR, GBP, JPY"
         )
-        await query.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
-    elif data == "menu_vip":
-        await send_vip_menu(query.message, user_id)
-    elif data == "menu_brokers":
-        await query.message.reply_text(
-            broker_message(),
+        lines.append("\n📢 https://t.me/ApexTradesHub")
+        await query.edit_message_text(
+            "\n".join(lines),
+            reply_markup=back_keyboard(),
             parse_mode=ParseMode.MARKDOWN,
             disable_web_page_preview=True,
         )
+
+    elif data == "menu_vip":
+        await send_vip_menu(query.message, user_id)
+
+    elif data == "menu_brokers":
+        await query.edit_message_text(
+            broker_message(),
+            reply_markup=back_keyboard(),
+            parse_mode=ParseMode.MARKDOWN,
+            disable_web_page_preview=True,
+        )
+
     elif data == "menu_refer":
-        bot_username = getattr(config, "BOT_USERNAME", "ApexTradeSignalsBot")
+        bot_username = getattr(config, "BOT_USERNAME", "ApexMarketSignalsBot").lstrip("@")
         link = f"https://t.me/{bot_username}?start=ref_{user_id}"
-        await query.message.reply_text(
+        await query.edit_message_text(
             f"🎁 *Refer & Earn*\n\nShare your link:\n`{link}`\n\n"
             f"You earn +{getattr(config, 'REFERRAL_REWARD_DAYS', 5)} VIP days "
             f"(limit {getattr(config, 'REFERRAL_REWARD_LIMIT', 4)} rewards).",
+            reply_markup=back_keyboard(),
             parse_mode=ParseMode.MARKDOWN,
         )
 
-    # ---- VIP / Payment flow ----
+    # ---- VIP / Payment flow (kept as-is) ----
     elif data == "vip_buy":
         await send_plan_selection_menu(query.message)
     elif data == "vip_claim_trial":
@@ -178,4 +256,3 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
             await query.answer("⛔ Admin only.", show_alert=True)
             return
         await query.answer("Release-to-free handled by signal job.")
-  
