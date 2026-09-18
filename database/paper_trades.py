@@ -199,3 +199,23 @@ def get_paper_trade_stats() -> dict[str, Any]:
                 "win_rate": win_rate,
                 "total_r": round(float(row["total_r"] or 0), 2),
             }
+
+def delete_paper_trade_by_code(signal_code: str) -> bool:
+    """Delete a paper trade by signal_code. Returns True if a row was deleted."""
+    if not DATABASE_URL:
+        return False
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                DELETE FROM paper_trades
+                WHERE signal_code = %s
+                RETURNING id
+                """,
+                (signal_code.strip().upper(),),
+            )
+            res = cur.fetchone()
+        conn.commit()
+
+    return res is not None
