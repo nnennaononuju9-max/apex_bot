@@ -214,3 +214,23 @@ async def signalstatus_command(update: Update, context: ContextTypes.DEFAULT_TYP
     paused = are_signals_paused()
     status = "⏸ *PAUSED*" if paused else "▶️ *ACTIVE*"
     await update.message.reply_text(f"📡 Signal Status: {status}", parse_mode="Markdown")
+
+async def deltrade_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin: /deltrade SIGNAL_CODE — delete a paper trade"""
+    if not is_admin(update.effective_user.id):
+        await update.message.reply_text("⛔ Admin only.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /deltrade SIGNAL_CODE\nExample: /deltrade 4BDD0219")
+        return
+
+    from database import delete_paper_trade_by_code
+
+    code = context.args[0].strip().upper()
+    deleted = delete_paper_trade_by_code(code)
+
+    if deleted:
+        await update.message.reply_text(f"✅ Deleted paper trade `{code}`.", parse_mode="Markdown")
+    else:
+        await update.message.reply_text(f"❌ No paper trade found with code `{code}`.", parse_mode="Markdown")
