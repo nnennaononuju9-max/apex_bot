@@ -60,8 +60,11 @@ def main_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton("📊 Paper Trades", callback_data="menu_trades"),
         ],
         [
-            InlineKeyboardButton("🏦 Recommended Brokers", callback_data="menu_brokers"),
+            InlineKeyboardButton("📅 Weekly Recap", callback_data="menu_weekly"),
             InlineKeyboardButton("🎁 Refer & Earn", callback_data="menu_refer"),
+        ],
+        [
+            InlineKeyboardButton("🏦 Recommended Brokers", callback_data="menu_brokers"),
         ],
         [
             InlineKeyboardButton(
