@@ -19,17 +19,17 @@ CRYPTO_SYMBOL_MAP = {
     "BTC/USD": "BTC-USD",
     "ETH/USD": "ETH-USD",
     "SOL/USD": "SOL-USD",
-    "BNB/USD": "BNB-USD",
-    "XRP/USD": "XRP-USD",
-    "DOGE/USD": "DOGE-USD",
-    "ADA/USD": "ADA-USD",
 }
 
 FOREX_AND_COMMODITIES = [
-    "XAU/USD",
     "EUR/USD",
-    "GBP/USD",
     "USD/JPY",
+    "GBP/USD",
+    "XAU/USD",
+    "AUD/USD",
+    "USD/CAD",
+    "USD/CHF",
+    "NZD/USD",
 ]
 
 ALL_MARKETS = [
@@ -79,10 +79,6 @@ def get_data_coinbase(
         BTC/USD
         ETH/USD
         SOL/USD
-        BNB/USD
-        XRP/USD
-        DOGE/USD
-        ADA/USD
     """
 
     coinbase_symbol = CRYPTO_SYMBOL_MAP.get(symbol)
