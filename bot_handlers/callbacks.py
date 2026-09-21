@@ -167,18 +167,57 @@ async def menu_callback_router(update: Update, context: ContextTypes.DEFAULT_TYP
         )
 
     elif data == "menu_trades":
+        from database import get_recent_paper_trades
+
         stats = get_paper_trade_stats()
         open_trades = get_open_paper_trades()
+        recent = get_recent_paper_trades(5)
+
         lines = [
-            "📊 *PAPER TRADING TRACKER*\n",
-            f"• Total: `{stats['total']}`  Open: `{stats['open']}`",
-            f"• Wins: `{stats['wins']}`  Losses: `{stats['losses']}`",
-            f"• Win Rate: `{stats['win_rate']}%`  R: `{stats['total_r']:+}`",
+            "📊 *APEX TRADE REVIEW*\n",
+            "*Overview*",
+            f"• Total trades: `{stats['total']}`",
+            f"• Open: `{stats['open']}`",
+            f"• Wins: `{stats['wins']}`",
+            f"• Losses: `{stats['losses']}`",
+            f"• Win rate: `{stats['win_rate']}%`",
+            f"• Total R: `{stats['total_r']:+}R`\n",
         ]
+
         if open_trades:
-            lines.append("\n🟢 *OPEN:*")
-            for ot in open_trades[:5]:
-                lines.append(f"• {ot['symbol']} {ot['direction']}")
+            lines.append("*Open positions*")
+            for ot in open_trades[:6]:
+                entry = ot.get("entry_price", "")
+                sl = ot.get("stop_loss", "")
+                lines.append(
+                    f"🟢 *{ot['symbol']}* {ot['direction']}\n"
+                    f"   Entry `{entry}` | SL `{sl}`"
+                )
+            lines.append("")
+
+        if recent:
+            lines.append("*Recent closed*")
+            for t in recent:
+                result = str(t.get("result") or "")
+                if result == "open":
+                    continue
+                symbol = t.get("symbol") or ""
+                direction = t.get("direction") or ""
+                r_mult = t.get("r_multiple")
+                r_txt = f"{float(r_mult):+.1f}R" if r_mult is not None else "—"
+
+                if result in ("tp_hit", "tp1_hit", "tp2_hit", "tp3_hit"):
+                    mark = "✅"
+                elif result == "sl_hit":
+                    mark = "🛑"
+                else:
+                    mark = "•"
+
+                lines.append(f"{mark} {symbol} {direction} | {result} | {r_txt}")
+            lines.append("")
+
+        lines.append("_Risk small. Protect capital. Process over prediction._")
+
         await query.edit_message_text(
             "\n".join(lines),
             reply_markup=back_keyboard(),
