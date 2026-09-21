@@ -278,3 +278,90 @@ async def setvip_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(
         "Usage: /setvip <telegram_id> <days> [weekly|monthly|trial]"
     )
+
+async def weekly_recap_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Weekly paper-trade performance recap."""
+    from datetime import datetime, timedelta, timezone
+
+    trades = get_recent_paper_trades(50)
+    now = datetime.now(timezone.utc)
+    week_ago = now - timedelta(days=7)
+
+    week_trades = []
+    for t in trades:
+        opened = t.get("opened_at") or t.get("closed_at")
+        if not opened:
+            week_trades.append(t)
+            continue
+        try:
+            if getattr(opened, "tzinfo", None) is None:
+                week_trades.append(t)
+            elif opened >= week_ago:
+                week_trades.append(t)
+        except Exception:
+            week_trades.append(t)
+
+    if not week_trades:
+        week_trades = trades[:15]
+
+    wins = losses = open_count = 0
+    total_r = 0.0
+    best = None
+    worst = None
+
+    for t in week_trades:
+        result = str(t.get("result") or "")
+        r = t.get("r_multiple")
+        r_val = float(r) if r is not None else None
+
+        if result == "open":
+            open_count += 1
+        elif result in ("tp_hit", "tp1_hit", "tp2_hit", "tp3_hit"):
+            wins += 1
+            if r_val is not None:
+                total_r += r_val
+                if best is None or r_val > best[1]:
+                    best = (t, r_val)
+        elif result == "sl_hit":
+            losses += 1
+            if r_val is not None:
+                total_r += r_val
+                if worst is None or r_val < worst[1]:
+                    worst = (t, r_val)
+
+    closed = wins + losses
+    win_rate = round((wins / closed * 100), 1) if closed else 0.0
+
+    lines = [
+        "📅 *APEX WEEKLY RECAP*\n",
+        f"• Trades: `{len(week_trades)}`",
+        f"• Wins: `{wins}`",
+        f"• Losses: `{losses}`",
+        f"• Open: `{open_count}`",
+        f"• Win rate: `{win_rate}%`",
+        f"• Total R: `{total_r:+.1f}R`\n",
+    ]
+
+    if best:
+        t, r_val = best
+        lines.append(
+            f"*Best move*\n✅ {t.get('symbol')} {t.get('direction')} | `{r_val:+.1f}R`\n"
+        )
+    if worst:
+        t, r_val = worst
+        lines.append(
+            f"*Worst move*\n🛑 {t.get('symbol')} {t.get('direction')} | `{r_val:+.1f}R`\n"
+        )
+
+    lines.append(
+        "*Focus for next week*\n"
+        "• Risk 1% max per trade\n"
+        "• No revenge trades after SL\n"
+        "• TP1 → move BE → runner\n\n"
+        "_Process over prediction._"
+    )
+
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode=ParseMode.MARKDOWN,
+   )
