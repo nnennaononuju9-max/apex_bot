@@ -15,7 +15,7 @@ from database import (
     get_free_channel,
     get_open_paper_trades,
     get_paper_trade_stats,
-    get_recent_paper_trades
+    get_recent_paper_trades,
     get_vip_channel,
     is_vip,
 )
