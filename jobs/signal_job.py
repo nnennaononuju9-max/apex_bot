@@ -91,22 +91,9 @@ async def _process_market(
     free_channel: str | None,
     vip_channel: str | None,
 ) -> None:
-    """Scan one market for free and VIP signals."""
+    """Scan one market for VIP first, then free."""
 
-    if free_channel:
-        free_signal = await asyncio.to_thread(
-            prepare_free_signal,
-            symbol,
-        )
-
-        if free_signal and signal_is_publishable(free_signal):
-            await _deliver_signal(
-                context,
-                signal=free_signal,
-                channel_id=free_channel,
-                vip=False,
-            )
-
+    # VIP first so free does not lock the setup before VIP posts
     if vip_channel:
         vip_signal = await asyncio.to_thread(
             prepare_vip_signal,
@@ -121,6 +108,19 @@ async def _process_market(
                 vip=True,
             )
 
+    if free_channel:
+        free_signal = await asyncio.to_thread(
+            prepare_free_signal,
+            symbol,
+        )
+
+        if free_signal and signal_is_publishable(free_signal):
+            await _deliver_signal(
+                context,
+                signal=free_signal,
+                channel_id=free_channel,
+                vip=False,
+    )
 
 async def _deliver_signal(
     context: ContextTypes.DEFAULT_TYPE,
