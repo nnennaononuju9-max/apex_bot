@@ -28,6 +28,7 @@ from bot_handlers.commands import (
     brokers_command,
     papertrades_command,
     broadcast_command,
+    weekly_recap_command,
 )
 from bot_handlers.callbacks import menu_callback_router
 from bot_handlers.payments import payment_proof_message_handler
@@ -92,6 +93,8 @@ def main() -> None:
     application.add_handler(CommandHandler("papertrades", papertrades_command))
     application.add_handler(CommandHandler("performance", papertrades_command))
     application.add_handler(CommandHandler("broadcast", broadcast_command))
+    application.add_handler(CommandHandler("weekly", weekly_recap_command))
+    application.add_handler(CommandHandler("recap", weekly_recap_command))
 
     # ---- Admin commands ----
     application.add_handler(CommandHandler("setvip", setvip_command))
