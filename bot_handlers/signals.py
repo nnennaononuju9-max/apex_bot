@@ -33,20 +33,17 @@ def get_signal_key(signal: dict[str, Any]) -> str:
     )
     return f"{symbol}:{direction}:{price}"
 
-
 def build_signal_message(signal: dict[str, Any], vip: bool = False) -> str:
     emoji = "🟢" if signal.get("direction") == "BUY" else "🔴"
     crypto_tag = (
-        "🪙 Crypto Setup (Binance)"
+        "🪙 Crypto Setup"
         if signal.get("is_crypto")
         else "🏛️ Forex & Commodities"
     )
-    reasons = "\n".join(f"• {r}" for r in signal.get("reasons", []))
+    reasons_list = signal.get("reasons") or []
+    reasons = "\n".join(f"• {r}" for r in reasons_list) if reasons_list else "• Confluence confirmed"
     chart_url = signal.get("chart_url", "https://www.tradingview.com")
 
-    header = "👑💎 APEX VIP SIGNAL" if vip else "📡 APEX LIVE SIGNAL"
-
-    # Fixed: correctly reads entry_price
     entry = price_format(
         signal.get("entry_price")
         or signal.get("price")
@@ -59,26 +56,6 @@ def build_signal_message(signal: dict[str, Any], vip: bool = False) -> str:
     tp2_str = price_format(signal.get("tp2") or 0)
     tp3_str = price_format(signal.get("tp3") or 0)
 
-    if vip:
-        tp_block = (
-            f"🎯 TP1 (50% Close): `{tp1_str}`\n"
-            f"🎯 TP2 (30% Close): `{tp2_str}`\n"
-            f"🎯 TP3 (Runner): `{tp3_str}`"
-        )
-    else:
-        tp_block = (
-            f"🎯 TP1: `{tp1_str}`\n"
-            f"🎯 TP2: `{tp2_str}`\n"
-            f"🔒 *TP3 Runner & Live Exit Alerts:* "
-            f"[Unlock in VIP](https://t.me/ApexMarketSignalsBot)"
-        )
-
-    risk_guide = (
-        "⚡ Crypto: Spot or 3x-5x Futures Max"
-        if signal.get("is_crypto")
-        else "⚡ Forex: Risk 1-2% account balance maximum"
-    )
-
     strength = signal.get("strength") or ""
     direction = signal.get("direction") or ""
     symbol = signal.get("symbol") or ""
@@ -87,24 +64,57 @@ def build_signal_message(signal: dict[str, Any], vip: bool = False) -> str:
     timeframe = signal.get("timeframe") or signal.get("interval") or "15M + 1H"
     signal_code = signal.get("signal_code", "")
 
+    if vip:
+        return f"""
+👑 *APEX VIP SIGNAL*
+══════════════════
+{emoji} *{strength} {direction}* {emoji}
+
+{crypto_tag}
+💎 Pair: *{symbol}*
+
+💰 Entry: `{entry}`
+🛑 Stop Loss: `{stop_loss}`
+
+🎯 TP1 (50% Close): `{tp1_str}`
+🎯 TP2 (30% Close): `{tp2_str}`
+🎯 TP3 (Runner): `{tp3_str}`
+
+📊 Score: *{score}/{max_score}*
+⏱ Timeframes: *{timeframe}*
+
+🔎 *Confluence:*
+{reasons}
+
+📐 *Risk guide:*
+• Risk 1% per trade
+• Move SL to breakeven after TP1
+• Leave runner for TP3
+
+🆔 Signal: `{signal_code}`
+📈 [Open TradingView Chart]({chart_url})
+
+⚠️ VIP only. Not financial advice. Always use Stop Loss.
+""".strip()
+
+    # Free format (shorter)
     return f"""
 {emoji} *{strength} {direction}* {emoji}
-{header}
+📡 *APEX LIVE SIGNAL*
 ══════════════════
 {crypto_tag}
 
 💎 Pair: *{symbol}*
 💰 Entry: `{entry}`
 🛑 Stop Loss: `{stop_loss}`
-{tp_block}
-📊 Signal Score: *{score}/{max_score}*
-
-🔎 Technical Confluence:
-{reasons}
+🎯 TP1: `{tp1_str}`
+🎯 TP2: `{tp2_str}`
+🔒 *TP3 Runner:* [Unlock in VIP](https://t.me/ApexMarketSignalsBot)
+📊 Score: *{score}/{max_score}*
 
 ⏱ Timeframes: *{timeframe}*
 📈 [Open TradingView Chart]({chart_url})
 🆔 Signal: `{signal_code}`
 
-⚠️ {risk_guide}. Always place Stop Loss immediately.
+⚠️ Always place Stop Loss immediately.
 """.strip()
