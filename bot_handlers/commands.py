@@ -189,23 +189,54 @@ async def papertrades_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     recent = get_recent_paper_trades(5)
 
     lines = [
-        "📊 *APEX PAPER TRADING TRACKER*\n",
-        f"• Total Signals: `{stats['total']}`",
+        "📊 *APEX TRADE REVIEW*\n",
+        "*Overview*",
+        f"• Total trades: `{stats['total']}`",
         f"• Open: `{stats['open']}`",
-        f"• Wins: `🎯 {stats['wins']}`",
-        f"• Losses: `🛑 {stats['losses']}`",
-        f"• Win Rate: `🏆 {stats['win_rate']}%`",
-        f"• Total R: `📈 {stats['total_r']:+}R`\n",
+        f"• Wins: `{stats['wins']}`",
+        f"• Losses: `{stats['losses']}`",
+        f"• Win rate: `{stats['win_rate']}%`",
+        f"• Total R: `{stats['total_r']:+}R`\n",
     ]
-    if open_trades:
-        lines.append("🟢 *OPEN POSITIONS:*")
-        for ot in open_trades[:6]:
-            lines.append(
-                f"• *{ot['symbol']}* ({ot['direction']}) | "
-                f"Entry: `{float(ot['entry_price'])}`"
-            )
-    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
 
+    if open_trades:
+        lines.append("*Open positions*")
+        for ot in open_trades[:6]:
+            entry = ot.get("entry_price", "")
+            sl = ot.get("stop_loss", "")
+            lines.append(
+                f"🟢 *{ot['symbol']}* {ot['direction']}\n"
+                f"   Entry `{entry}` | SL `{sl}`"
+            )
+        lines.append("")
+
+    if recent:
+        lines.append("*Recent closed*")
+        for t in recent:
+            result = str(t.get("result") or "")
+            symbol = t.get("symbol") or ""
+            direction = t.get("direction") or ""
+            r_mult = t.get("r_multiple")
+            r_txt = f"{float(r_mult):+.1f}R" if r_mult is not None else "—"
+
+            if result in ("tp_hit", "tp1_hit", "tp2_hit", "tp3_hit"):
+                mark = "✅"
+            elif result == "sl_hit":
+                mark = "🛑"
+            elif result == "open":
+                continue
+            else:
+                mark = "•"
+
+            lines.append(f"{mark} {symbol} {direction} | {result} | {r_txt}")
+        lines.append("")
+
+    lines.append("_Risk small. Protect capital. Process over prediction._")
+
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode=ParseMode.MARKDOWN,
+    )
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not is_admin(update.effective_user.id):
